@@ -56,6 +56,17 @@ first run; pass `--model yolo11s.pt` if the machine is modest. See
 
 Note the machine's LAN address — the robot needs to reach it.
 
+The server logs first contact, a summary every 10 s, and when a client goes
+quiet — enough to tell "the robot isn't reaching me" from "it is, and the
+detections are empty" without a line per frame:
+
+    Serving yolo11x.pt on mps at http://0.0.0.0:8100
+    first contact from 10.0.0.42
+    10.0.0.42: 118 req in 10s (11.8/s), 41 ms avg, 1.2 det/req
+    10.0.0.42 went quiet after 118 requests
+
+Pass `--verbose` to add uvicorn's per-request access log when debugging.
+
 ### 2. Start the app, on the robot
 
 Install it as a Reachy Mini app, then open the control panel at
