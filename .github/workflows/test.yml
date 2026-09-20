@@ -17,3 +17,6 @@ jobs:
       # don't import it, so install only what the tests actually touch.
       - run: uv pip install numpy scipy pillow requests pytest
       - run: uv run pytest tests -q
+      # The control panel's state sync has races that only show up under
+      # out-of-order responses; these drive it against a stubbed DOM.
+      - run: node tests/test_panel.mjs

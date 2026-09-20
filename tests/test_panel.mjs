@@ -1,0 +1,171 @@
+// Regression tests for the control panel's state sync.
+//
+// The panel polls /state every 300 ms while the user is editing, so responses
+// routinely arrive out of order. These tests drive main.js against a stubbed
+// DOM and a stubbed app whose latency we control, reproducing the interleavings
+// that a browser produces only intermittently.
+//
+//     node tests/test_panel.mjs [path/to/main.js]
+
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import process from "node:process";
+import vm from "node:vm";
+
+const SOURCE = process.argv[2] ?? "gaze_tracker/static/main.js";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function makeEl(id) {
+    const handlers = {};
+    return {
+        id,
+        value: "",
+        checked: false,
+        textContent: "",
+        style: {},
+        classList: {
+            set: new Set(),
+            add(c) { this.set.add(c); },
+            remove(c) { this.set.delete(c); },
+            toggle(c, on) { on ? this.set.add(c) : this.set.delete(c); },
+            contains(c) { return this.set.has(c); },
+        },
+        addEventListener(ev, fn) { (handlers[ev] ??= []).push(fn); },
+        append() {},
+        fire(ev, extra = {}) {
+            for (const fn of handlers[ev] ?? []) fn({ target: this, ...extra });
+        },
+    };
+}
+
+function harness(source) {
+    const ids = [
+        "label", "conf", "conf-value", "enabled", "scan", "server-url",
+        "apply-url", "badge-detector", "badge-lock", "badge-fps", "marker", "error",
+    ];
+    const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
+    const app = {
+        enabled: false, label: "person", conf: 0.4, server_url: "http://old:8100",
+        scan: true, locked: false, detector_ok: true, error: "", fps: 0, center: null,
+    };
+    const posts = [];
+    const delays = { state: 0, config: 0 };
+
+    async function fetchStub(path, options) {
+        if (path === "/classes") {
+            return { json: async () => ({ classes: ["person", "cat", "dog"] }) };
+        }
+        if (path === "/state") {
+            // Snapshot before sleeping: that is what makes a slow reply stale.
+            const snap = { ...app };
+            await sleep(delays.state);
+            return { json: async () => snap };
+        }
+        if (path === "/config") {
+            const body = JSON.parse(options.body);
+            posts.push(body);
+            Object.assign(app, body);
+            const snap = { ...app };
+            await sleep(delays.config);
+            return { json: async () => snap };
+        }
+        throw new Error(`unexpected path ${path}`);
+    }
+
+    const ctx = {
+        document: { getElementById: (id) => els[id] ?? null, activeElement: null },
+        fetch: fetchStub,
+        Option: function (text, value) { return { text, value }; },
+        setTimeout, clearTimeout, setInterval, clearInterval, console,
+    };
+    vm.createContext(ctx);
+    vm.runInContext(fs.readFileSync(source, "utf8"), ctx);
+    return { els, app, posts, delays };
+}
+
+const tests = {
+    // Bug: mousedown blurs the input, so a poll landing between blur and click
+    // reset .value, and the click handler then posted the stale URL back.
+    async "a stale poll must not steal what was typed"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+        assert.equal(h.els["server-url"].value, "http://old:8100");
+
+        h.delays.state = 400;
+        await sleep(320); // the interval fires a poll that is now in flight
+
+        h.els["server-url"].value = "http://new:8100";
+        h.els["server-url"].fire("input");
+        h.els["apply-url"].fire("click");
+
+        await sleep(600); // config lands, then the stale poll lands
+        assert.equal(h.posts.at(-1)?.server_url, "http://new:8100",
+            "the typed URL must be what gets posted");
+        assert.equal(h.els["server-url"].value, "http://new:8100",
+            "the applied URL must survive the late poll");
+        assert.equal(h.app.server_url, "http://new:8100");
+    },
+
+    async "a stale poll must not revert the slider"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+
+        h.delays.state = 500;
+        await sleep(320);
+
+        h.els.conf.value = 0.8;
+        h.els.conf.fire("input");
+
+        await sleep(700);
+        assert.equal(Number(h.els.conf.value), 0.8, "slider must not jump back");
+        assert.equal(h.app.conf, 0.8);
+    },
+
+    async "a stale poll must not revert a toggle"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+
+        h.delays.state = 500;
+        await sleep(320);
+
+        h.els.enabled.checked = true;
+        h.els.enabled.fire("change");
+
+        await sleep(700);
+        assert.equal(h.els.enabled.checked, true, "toggle must not flip back");
+        assert.equal(h.app.enabled, true);
+    },
+
+    async "Enter applies the URL"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+        h.els["server-url"].value = "http://typed:9000";
+        h.els["server-url"].fire("input");
+        h.els["server-url"].fire("keydown", { key: "Enter" });
+        await sleep(60);
+        assert.equal(h.app.server_url, "http://typed:9000");
+    },
+
+    async "a blank URL is not submitted"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+        h.els["server-url"].value = "   ";
+        h.els["server-url"].fire("input");
+        h.els["apply-url"].fire("click");
+        await sleep(60);
+        assert.equal(h.app.server_url, "http://old:8100");
+    },
+};
+
+let failed = 0;
+for (const [name, fn] of Object.entries(tests)) {
+    try {
+        await fn();
+        console.log(`  ok   ${name}`);
+    } catch (e) {
+        failed++;
+        console.log(`  FAIL ${name}\n       ${e.message.split("\n")[0]}`);
+    }
+}
+console.log(failed ? `\n${failed} failed` : `\n${Object.keys(tests).length} passed`);
+process.exit(failed ? 1 : 0);
