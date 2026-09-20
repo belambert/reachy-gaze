@@ -47,9 +47,13 @@ Target selection reuses the approach in the SDK's own
 `reachy_mini.vision.face_tracking`: acquire the largest box, then follow the
 nearest one frame to frame, with a max-jump gate so the head doesn't snap
 between two cats and a miss counter so it lets go once the real one leaves.
-Selection is class-blind: the four labels only decide what gets detected, and
-from there the head follows a box, whatever it is labelled. The panel reports
-which class the current target came back as.
+`TRACK_LABELS` is also a **preference order**: a cat in view outranks a person
+in view, and the head will leave the one for the other. A preferred class has
+to be seen for a few frames running before it takes the lock, so a detection
+flickering at the confidence threshold cannot bounce the head between two
+subjects, and the minimum-area gate still applies — a stray speck of cat will
+not pull the head off a person standing right there. The preference does not
+run backwards: once on the cat, a person cannot take it back.
 
 After `DWELL` seconds on one target the head deliberately leaves it and scans
 for `SURVEY_FOR` seconds, to see who else is about. It remembers where that
@@ -111,8 +115,9 @@ server's address comes from DHCP and moves.
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.
 
-What it hunts for is `TRACK_LABELS` in `tracker/main.py` — `person`, `cat`,
-`dog`, `bird`. Any COCO class works there. Whenever the Detector address
+What it hunts for is `TRACK_LABELS` in `tracker/main.py` — `cat`, `dog`,
+`bird`, `person`, most preferred first. Any COCO class works there, and
+reordering the list is how you change what it would rather watch. Whenever the Detector address
 changes the app checks the labels against the server's vocabulary and logs a
 warning for any it doesn't know, because the server quietly detects
 *everything* when it recognises none of them.
