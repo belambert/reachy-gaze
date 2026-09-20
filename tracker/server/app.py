@@ -5,8 +5,11 @@ uv run --extra server tracker-server --host 0.0.0.0
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
+import time
+from contextlib import asynccontextmanager
 
 import numpy as np
 import torch
@@ -16,10 +19,45 @@ from fastapi import FastAPI, Query, Request
 from PIL import Image
 from ultralytics import YOLO
 
+from tracker.server.traffic import SUMMARY_EVERY, Traffic
+
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="tracker detector")
+traffic = Traffic()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Summarise traffic on a timer for as long as the server is up."""
+
+    async def report() -> None:
+        while True:
+            await asyncio.sleep(SUMMARY_EVERY)
+            for line in traffic.summarise():
+                logger.info(line)
+
+    task = asyncio.create_task(report())
+    try:
+        yield
+    finally:
+        task.cancel()
+
+
+app = FastAPI(title="tracker detector", lifespan=lifespan)
 cli = typer.Typer(add_completion=False)
+
+
+@app.middleware("http")
+async def count_request(request: Request, call_next):
+    """Time every request and note when an address first appears."""
+    started = time.perf_counter()
+    response = await call_next(request)
+    if request.client is not None:
+        first = traffic.record(request.client.host, time.perf_counter() - started)
+        if first:
+            logger.info(first)
+    return response
+
 
 _model: YOLO | None = None
 _device = "cpu"
@@ -79,6 +117,9 @@ async def detect(
             result.boxes.cls.tolist(),
         )
     ]
+    if request.client is not None:
+        traffic.note_detections(request.client.host, len(detections))
+
     return {"detections": detections, "width": image.width, "height": image.height}
 
 
@@ -88,6 +129,7 @@ def main(
     port: int = 8100,
     model: str = "yolo11x.pt",
     device: str = "",
+    verbose: bool = False,
 ) -> None:
     """Serve COCO detection over HTTP."""
     global _model, _device
@@ -98,7 +140,15 @@ def main(
     _model.to(_device)
     logger.info("Serving %s on %s at http://%s:%d", model, _device, host, port)
 
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    # Per-request access logging is far too chatty at the robot's frame rate,
+    # so it is off unless asked for; the traffic summary covers the normal case.
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info" if verbose else "warning",
+        access_log=verbose,
+    )
 
 
 if __name__ == "__main__":
