@@ -144,7 +144,7 @@ Constants live at the top of `tracker/main.py`:
 | ---------------- | ------- | --------------------------------------------------------- |
 | `DETECT_HZ`      | 12      | Ceiling on detection requests                             |
 | `SMOOTH_TAU`     | 0.09    | Follower time constant; larger is smoother and laggier    |
-| `MAX_HEAD_PULL`  | 20.0    | rad/s² cap on the follower's pull; **lower is gentler**   |
+| `MAX_HEAD_PULL`  | 10.0    | rad/s² cap on the follower's pull; **lower is gentler**   |
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
@@ -169,16 +169,22 @@ reinstall to find a setting you like. It bounds how much commanded velocity can
 change in a single tick, which is the dial that trades smoothness against
 chasing power:
 
-| Responsiveness | Peak jerk | Peak speed |
-| -------------- | --------- | ---------- |
-| 4              | 2.2       | 10 °/s     |
-| 20 (default)   | 11.1      | 52 °/s     |
-| 60             | 33.3      | 150 °/s    |
+Measured against a 40° step, with the time taken to settle within a degree of
+it:
+
+| Responsiveness | Peak jerk | Peak speed | Settles in |
+| -------------- | --------- | ---------- | ---------- |
+| 4              | 2.2       | 10 °/s     | 3.80 s     |
+| 10 (default)   | 5.6       | 26 °/s     | 1.60 s     |
+| 20             | 11.1      | 52 °/s     | 0.92 s     |
+| 60             | 33.3      | 150 °/s    | 0.56 s     |
 
 Every setting still converges without overshoot; lower simply takes longer.
-Simulated against a subject crossing the view with detection at 12 Hz, the
-default cuts peak jerk about fourfold versus a plain first-order lag, costing
-roughly 0.7° of tracking lag.
+Simulated against a brisk subject — 40° of yaw at 0.15 Hz, detected at 12 Hz —
+the follower cuts peak jerk about fourfold versus the plain first-order lag it
+replaced, 6.5 against 26.2. That costs tracking lag, and this is where the
+setting is felt: a mean of 8.2° behind the subject at 10, against 4.2° at 20.
+Raise it if the head visibly trails things you care about.
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
 are constructor arguments on `TargetSelector` in `tracker/tracking.py`.
