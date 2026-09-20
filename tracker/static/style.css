@@ -118,6 +118,10 @@ code {
     font-size: 12px;
 }
 
+.hint.note {
+    margin: -8px 0 16px;
+}
+
 .badges {
     display: flex;
     flex-wrap: wrap;

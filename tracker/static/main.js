@@ -43,11 +43,13 @@ const write = (config) =>
 function apply(state) {
     if (!dirty.has("label")) el("label").value = state.label;
     if (!dirty.has("conf")) el("conf").value = state.conf;
+    if (!dirty.has("pull")) el("pull").value = state.pull;
     if (!dirty.has("enabled")) el("enabled").checked = state.enabled;
     if (!dirty.has("scan")) el("scan").checked = state.scan;
     if (!dirty.has("server_url")) el("server-url").value = state.server_url;
 
     el("conf-value").textContent = Number(el("conf").value).toFixed(2);
+    el("pull-value").textContent = Number(el("pull").value).toFixed(0);
     el("server-url").classList.toggle("unsaved", dirty.has("server_url"));
 
     badge("badge-detector", state.detector_ok, state.detector_ok ? "detector up" : "detector down");
@@ -94,13 +96,15 @@ async function init() {
     });
 
     // Writing on every drag event would flood the app; the label tracks live.
-    let confTimer;
-    el("conf").addEventListener("input", (e) => {
-        dirty.add("conf");
-        el("conf-value").textContent = Number(e.target.value).toFixed(2);
-        clearTimeout(confTimer);
-        confTimer = setTimeout(() => write({ conf: Number(e.target.value) }), 150);
-    });
+    for (const [id, digits] of [["conf", 2], ["pull", 0]]) {
+        let timer;
+        el(id).addEventListener("input", (e) => {
+            dirty.add(id);
+            el(`${id}-value`).textContent = Number(e.target.value).toFixed(digits);
+            clearTimeout(timer);
+            timer = setTimeout(() => write({ [id]: Number(e.target.value) }), 150);
+        });
+    }
 
     for (const id of ["enabled", "scan"]) {
         el(id).addEventListener("change", (e) => {

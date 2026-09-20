@@ -23,6 +23,12 @@
             <output id="conf-value"></output>
         </label>
 
+        <label class="row">
+            <span>Responsiveness</span>
+            <input type="range" id="pull" min="4" max="60" step="1">
+            <output id="pull-value"></output>
+        </label>
+
         <label class="row toggle">
             <input type="checkbox" id="enabled">
             <span>Tracking enabled</span>
@@ -33,6 +39,8 @@
             <span>Sweep when target is lost</span>
         </label>
     </section>
+
+    <p class="hint note">Lower responsiveness means smoother, laggier motion.</p>
 
     <section class="card">
         <div class="row">

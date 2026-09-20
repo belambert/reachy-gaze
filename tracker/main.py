@@ -15,7 +15,7 @@ import threading
 import time
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
@@ -54,6 +54,8 @@ class Config(BaseModel):
     conf: float | None = None
     server_url: str | None = None
     scan: bool | None = None
+    # A pull of zero would freeze the head, so refuse it rather than obey it.
+    pull: float | None = Field(None, gt=0.0, le=200.0)
 
 
 class State:
@@ -68,6 +70,7 @@ class State:
         self.conf = 0.4
         self.server_url = DEFAULT_SERVER_URL
         self.scan = True
+        self.pull = MAX_HEAD_PULL
 
         self.goal: Rotation | None = None
         self.head_pose = np.eye(4)
@@ -91,6 +94,7 @@ class State:
                 "conf": self.conf,
                 "server_url": self.server_url,
                 "scan": self.scan,
+                "pull": self.pull,
                 "locked": locked,
                 "detector_ok": self.detector_ok,
                 "error": self.error,
@@ -152,6 +156,7 @@ class Tracker(ReachyMiniApp):
                 goal = state.goal
                 fresh = goal is not None and now - state.last_seen < LOST_AFTER
                 scanning = state.enabled and state.scan and not fresh
+                smoother.max_pull = state.pull  # tunable live from the panel
 
             # One eased scalar drives both postures, so nothing steps on a
             # transition: antennas blend, and the sweep grows in rather than
