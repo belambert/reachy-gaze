@@ -46,3 +46,6 @@ where = ["."]
 
 [tool.setuptools.package-data]
 gaze_tracker = ["**/*"] # Also include all non-.py files
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
