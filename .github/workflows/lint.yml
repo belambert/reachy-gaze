@@ -14,5 +14,6 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv venv --python 3.13
       - run: uv pip install black isort
-      - run: uv run black --check tracker tests
-      - run: uv run isort --check-only tracker tests
+      # --no-project: syncing would pull the robot SDK, which needs cairo.
+      - run: uv run --no-project black --check tracker tests
+      - run: uv run --no-project isort --check-only tracker tests
