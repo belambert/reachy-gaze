@@ -96,24 +96,36 @@ def pose_matrix(rot: Rotation) -> npt.NDArray[np.float64]:
 
 
 class TargetSelector:
-    """Lock onto one detection: acquire the largest, then follow the nearest.
+    """Lock onto one detection: acquire the best, then follow it across frames.
 
     The max-jump gate is what stops the head snapping between two cats; the miss
     counter is what lets it let go once the real one has left the room.
+
+    `priority` ranks the classes: earlier is preferred, and a class we would
+    rather watch takes the lock off one we are already watching. It has to be
+    seen for `upgrade_after` frames running to do that, so a detection
+    flickering at the confidence threshold cannot bounce the head between two
+    subjects.
     """
 
     def __init__(
         self,
+        priority: list[str] | None = None,
         min_area_frac: float = 0.002,
         max_jump: float = 0.5,
         max_misses: int = 12,
+        upgrade_after: int = 3,
     ) -> None:
-        """Create a selector with the given acquisition and association gates."""
+        """Create a selector with the given preference and association gates."""
+        self._priority = list(priority or [])
         self._min_area_frac = min_area_frac
         self._max_jump = max_jump
         self._max_misses = max_misses
+        self._upgrade_after = upgrade_after
         self._center: tuple[float, float] | None = None
+        self._label: str | None = None
         self._misses = 0
+        self._better = 0
 
     def select(
         self, dets: list[Detection], width: int, height: int
@@ -123,36 +135,58 @@ class TargetSelector:
             self._miss()
             return None
 
-        if self._center is None:
-            det = max(dets, key=lambda d: d.area)
+        best = min(self._rank(det.label) for det in dets)
+        self._better = self._better + 1 if best < self._rank(self._label) else 0
+        wanted = [det for det in dets if self._rank(det.label) == best]
+
+        if self._center is None or self._better >= self._upgrade_after:
+            det = max(wanted, key=lambda d: d.area)
             if det.area < self._min_area_frac * width * height:
                 self._miss()
                 return None
         else:
             anchor = self._center
-            det = min(dets, key=lambda d: _dist2(norm_center(d, width, height), anchor))
+            det = min(
+                wanted, key=lambda d: _dist2(norm_center(d, width, height), anchor)
+            )
             if _dist2(norm_center(det, width, height), anchor) > self._max_jump**2:
                 self._miss()
                 return None
 
         self._center = norm_center(det, width, height)
+        self._label = det.label
         self._misses = 0
+        self._better = 0
         return det
+
+    def _rank(self, label: str | None) -> int:
+        """Lower is preferred; anything unlisted comes last."""
+        if label in self._priority:
+            return self._priority.index(label)
+        return len(self._priority)
 
     def _miss(self) -> None:
         self._misses += 1
         if self._misses > self._max_misses:
             self._center = None
+            self._label = None
 
     @property
     def has_target(self) -> bool:
         """Whether the selector is still associated with a target."""
         return self._center is not None
 
+    @property
+    def label(self) -> str | None:
+        """Class of the current target, if there is one."""
+        return self._label
+
     def reset(self) -> None:
         """Forget the current lock, e.g. after the tracked class changes."""
         self._center = None
+        self._label = None
         self._misses = 0
+        self._better = 0
 
 
 class CenterFilter:

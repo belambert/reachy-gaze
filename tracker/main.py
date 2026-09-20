@@ -30,8 +30,9 @@ from tracker.tracking import (
     pose_matrix,
 )
 
-# Hunted for together; the selector picks whichever is the better target.
-TRACK_LABELS = ["person", "cat", "dog", "bird"]
+# Hunted for together, and in preference order: a cat in view outranks a person
+# in view, and the head will leave the one for the other.
+TRACK_LABELS = ["cat", "dog", "bird", "person"]
 
 CONTROL_HZ = 50.0
 DETECT_HZ = 12.0  # request ceiling; the server is usually quicker than this
@@ -259,7 +260,7 @@ class Tracker(ReachyMiniApp):
         K, D = camera.K, camera.D
         T_head_cam = getattr(mini, "T_head_cam", None)
 
-        selector = TargetSelector()
+        selector = TargetSelector(TRACK_LABELS)
         smoother = CenterFilter()
         detector: RemoteDetector | None = None
         detector_url = ""
