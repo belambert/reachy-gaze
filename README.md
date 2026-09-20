@@ -50,8 +50,9 @@ between two cats and a miss counter so it lets go once the real one leaves.
     uv run gaze-tracker-server --host 0.0.0.0
 
 It serves on port 8100 and picks up CUDA, MPS, or CPU automatically. The default
-model, `yolo11n.pt`, downloads on first run; see [Choosing a model](#choosing-a-model)
-for why you probably want a bigger one.
+model, `yolo11x.pt`, is the most accurate of the family and downloads 109 MB on
+first run; pass `--model yolo11s.pt` if the machine is modest. See
+[Choosing a model](#choosing-a-model).
 
 Note the machine's LAN address — the robot needs to reach it.
 
@@ -68,9 +69,10 @@ and where in frame the tracker currently believes the target is.
 
 All five YOLO11 sizes are COCO-80 and drop in via `--model`; each downloads on
 first use. Latency below is **measured** on an Apple M4 Pro (14 core, MPS),
-decoding the exact JPEG payload the robot sends — 512 px wide, quality 75 —
-and timing decode plus inference together, median of 30 runs after 8 warmups.
-The mAP column is Ultralytics' published COCO figure, not measured here.
+decoding a JPEG payload at quality 75 and timing decode plus inference together,
+median of 30 runs after 8 warmups. The robot sends 640 px, so that is the column
+that applies; 512 px is kept to show what shrinking the payload would buy. The
+mAP column is Ultralytics' published COCO figure, not measured here.
 
 | Model        | Params | Weights | mAP50-95 | 640 px           | 512 px           |
 | ------------ | ------ | ------- | -------- | ---------------- | ---------------- |
@@ -85,15 +87,14 @@ the default of 12 Hz. On this class of hardware **every size fits**, including
 `yolo11x` with room to spare. The model is not the bottleneck; the request cap
 and the network round trip are.
 
-So pick on accuracy, not speed. `yolo11x` costs +15 mAP over `yolo11n` for 34 ms
-a frame you were going to spend waiting anyway, and that accuracy buys range —
-which is the whole reason detection is off-board. Drop down only if the machine
-running the server is weaker than this, or is doing something else.
+So pick on accuracy, not speed, which is why `yolo11x.pt` is the default. It
+costs +15 mAP over `yolo11n` for 34 ms a frame you were going to spend waiting
+anyway, and that accuracy buys range — the whole reason detection is off-board.
+Drop down only if the machine running the server is weaker than this one, or is
+busy with something else.
 
-Two caveats. These numbers are one machine and one 5-object test image; a slower
-laptop reorders the table. And note the 512 px column is faster only because the
-model letterboxes a smaller input — the server does not pass `imgsz`, so it
-currently runs everything at 640 regardless of what the robot sends.
+These numbers are one machine and one 5-object test image; a slower laptop
+reorders the table. Re-run the benchmark before trusting them elsewhere.
 
 ## Tuning
 
