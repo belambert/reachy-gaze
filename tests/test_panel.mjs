@@ -31,14 +31,15 @@ function makeEl(id) {
             contains(c) { return this.set.has(c); },
         },
         addEventListener(ev, fn) { (handlers[ev] ??= []).push(fn); },
-        append() {},
+        options: [],
+        append(...opts) { this.options.push(...opts); },
         fire(ev, extra = {}) {
             for (const fn of handlers[ev] ?? []) fn({ target: this, ...extra });
         },
     };
 }
 
-function harness(source) {
+function harness(source, { classesStatus = 200 } = {}) {
     const ids = [
         "label", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
         "server-url", "apply-url", "badge-detector", "badge-lock", "badge-fps",
@@ -52,16 +53,30 @@ function harness(source) {
     };
     const posts = [];
     const delays = { state: 0, config: 0 };
+    // init() fires its /classes fetch synchronously, so this has to be set
+    // before the harness runs rather than mutated afterwards.
+    const status = { classes: classesStatus };
+
+    const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
     async function fetchStub(path, options) {
         if (path === "/classes") {
-            return { json: async () => ({ classes: ["person", "cat", "dog"] }) };
+            if (status.classes !== 200) {
+                // FastAPI's 404 body is valid JSON, which is what made this
+                // failure mode so quiet in the first place.
+                return {
+                    ok: false,
+                    status: status.classes,
+                    json: async () => ({ detail: "Not Found" }),
+                };
+            }
+            return ok({ classes: ["person", "cat", "dog"] });
         }
         if (path === "/state") {
             // Snapshot before sleeping: that is what makes a slow reply stale.
             const snap = { ...app };
             await sleep(delays.state);
-            return { json: async () => snap };
+            return ok(snap);
         }
         if (path === "/config") {
             const body = JSON.parse(options.body);
@@ -69,7 +84,7 @@ function harness(source) {
             Object.assign(app, body);
             const snap = { ...app };
             await sleep(delays.config);
-            return { json: async () => snap };
+            return ok(snap);
         }
         throw new Error(`unexpected path ${path}`);
     }
@@ -82,12 +97,41 @@ function harness(source) {
     };
     vm.createContext(ctx);
     vm.runInContext(fs.readFileSync(source, "utf8"), ctx);
-    return { els, app, posts, delays };
+    return { els, app, posts, delays, status };
 }
 
 const tests = {
     // Bug: mousedown blurs the input, so a poll landing between blur and click
     // reset .value, and the click handler then posted the stale URL back.
+    async "the class picker is populated from the app"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+        assert.deepEqual(
+            h.els.label.options.map((o) => o.value),
+            ["person", "cat", "dog"],
+            "the picker must list what /classes returned",
+        );
+    },
+
+    async "a missing /classes is reported, not swallowed"() {
+        const h = harness(SOURCE, { classesStatus: 404 });
+        await sleep(30);
+
+        assert.match(h.els.error.textContent, /Could not load classes/);
+        assert.match(h.els.error.textContent, /404/);
+    },
+
+    async "the rest of the panel still works when /classes is missing"() {
+        const h = harness(SOURCE, { classesStatus: 404 });
+        await sleep(30);
+
+        // Listeners and polling must still have been wired up.
+        h.els.enabled.checked = true;
+        h.els.enabled.fire("change");
+        await sleep(60);
+        assert.equal(h.app.enabled, true, "controls must survive an empty picker");
+    },
+
     async "a stale poll must not steal what was typed"() {
         const h = harness(SOURCE);
         await sleep(30);
