@@ -69,7 +69,9 @@ function apply(state) {
 
     // The head holds its aim long after the last sighting, so saying "locked"
     // for all of it would misreport a target that left seconds ago.
-    if (!state.locked) {
+    if (state.surveying) {
+        badge("badge-lock", "warn", "looking around");
+    } else if (!state.locked) {
         badge("badge-lock", "bad", "searching");
     } else if (state.seen_ago < STALE_AFTER) {
         badge("badge-lock", "ok", `locked: ${state.label}`);

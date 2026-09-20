@@ -126,3 +126,75 @@ class TestHoldWindow:
         snap = self.state_at(11.0)
         assert snap["locked"] is False
         assert snap["seen_ago"] is None, "no point reporting staleness once given up"
+
+
+class TestSurvey:
+    """After a while on one target, the head goes to look for another."""
+
+    def loaded(self, surveying):
+        """A live target 40 degrees one way; a scan from rest heads the other."""
+        import time
+
+        from scipy.spatial.transform import Rotation
+
+        state = State()
+        state.goal = Rotation.from_euler("Z", -40, degrees=True)
+        state.last_seen = time.monotonic()
+        state.surveying = surveying
+        return state
+
+    def yaw_after(self, tracker, state, ticks):
+        mini = FakeMini(stop_after=ticks)
+        drive(tracker, mini, state)
+        from scipy.spatial.transform import Rotation
+
+        return np.degrees(
+            Rotation.from_matrix(mini.commands[-1][0][:3, :3]).as_euler("ZYX")[0]
+        )
+
+    def test_a_live_target_is_followed(self, tracker):
+        # Baseline: without a survey the head closes on the target, to -40.
+        assert self.yaw_after(tracker, self.loaded(False), 60) < -1.0
+
+    def test_a_survey_leaves_a_live_target(self, tracker):
+        # The whole point: a perfectly good target is abandoned on purpose, and
+        # the scan from rest goes the other way entirely.
+        assert self.yaw_after(tracker, self.loaded(True), 60) > 1.0
+
+    def test_the_panel_is_told(self):
+        assert self.loaded(True).snapshot()["surveying"] is True
+        assert self.loaded(False).snapshot()["surveying"] is False
+
+    def test_a_survey_does_not_clear_the_lock(self):
+        # The head leaves, but it still knows where the target was.
+        snap = self.loaded(True).snapshot()
+        assert snap["locked"] is True, "surveying is not losing the target"
+
+
+class TestApart:
+    """Telling the target we just left from a genuinely different one."""
+
+    def test_the_same_direction_is_zero(self, tracker):
+        from scipy.spatial.transform import Rotation
+
+        here = Rotation.from_euler("ZY", [30, 10], degrees=True)
+        assert tracker._apart(here, here) == pytest.approx(0.0)
+
+    def test_it_measures_the_short_way_round(self, tracker):
+        from scipy.spatial.transform import Rotation
+
+        a = Rotation.from_euler("Z", 170, degrees=True)
+        b = Rotation.from_euler("Z", -170, degrees=True)
+        assert tracker._apart(a, b) == pytest.approx(20.0)
+
+    def test_it_is_symmetric(self, tracker):
+        from scipy.spatial.transform import Rotation
+
+        a = Rotation.from_euler("ZY", [30, 10], degrees=True)
+        b = Rotation.from_euler("ZY", [-15, 5], degrees=True)
+        assert tracker._apart(a, b) == pytest.approx(tracker._apart(b, a))
+
+    def test_the_gate_is_wider_than_a_subject_but_narrower_than_a_room(self):
+        from tracker.main import AVOID_DEGREES
+
+        assert 10.0 < AVOID_DEGREES < 60.0
