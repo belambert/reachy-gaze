@@ -298,3 +298,46 @@ class TestPullTuning:
                 for _ in range(400)
             ]
             assert max(angles) <= 30.0 + 1e-6, f"pull={pull} overshot"
+
+
+class TestClassVersion:
+    """The panel reloads the picker off this counter, so it must move honestly."""
+
+    class _Stub:
+        url = "http://stub:8100"
+
+        def __init__(self, result):
+            self.result = result
+
+        def classes(self):
+            return self.result
+
+    def test_an_unchanged_list_does_not_bump_the_version(self):
+        from tracker.main import State, Tracker
+
+        state = State()
+        Tracker._refresh_classes(self._Stub(list(state.classes)), state)
+        assert state.classes_version == 0, "no change means no reload"
+
+    def test_a_changed_list_bumps_the_version(self):
+        from tracker.main import State, Tracker
+
+        state = State()
+        Tracker._refresh_classes(self._Stub(["cat", "dog"]), state)
+        assert state.classes_version == 1
+        assert state.snapshot()["classes_version"] == 1
+
+    def test_a_failed_fetch_leaves_the_version_alone(self):
+        from tracker.detector import DetectorUnavailable
+        from tracker.main import State, Tracker
+
+        state = State()
+
+        class Down:
+            url = "http://down"
+
+            def classes(self):
+                raise DetectorUnavailable("down")
+
+        Tracker._refresh_classes(Down(), state)
+        assert state.classes_version == 0

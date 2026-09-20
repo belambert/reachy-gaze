@@ -33,6 +33,7 @@ function makeEl(id) {
         addEventListener(ev, fn) { (handlers[ev] ??= []).push(fn); },
         options: [],
         append(...opts) { this.options.push(...opts); },
+        replaceChildren(...opts) { this.options = opts; },
         fire(ev, extra = {}) {
             for (const fn of handlers[ev] ?? []) fn({ target: this, ...extra });
         },
@@ -49,13 +50,12 @@ function harness(source, { classesStatus = 200 } = {}) {
     const app = {
         enabled: false, label: "person", conf: 0.4, pull: 20,
         server_url: "http://old:8100", scan: true, locked: false,
-        detector_ok: true, error: "", fps: 0, center: null,
+        detector_ok: true, error: "", fps: 0, center: null, classes_version: 0,
     };
     const posts = [];
     const delays = { state: 0, config: 0 };
-    // init() fires its /classes fetch synchronously, so this has to be set
-    // before the harness runs rather than mutated afterwards.
     const status = { classes: classesStatus };
+    const vocabulary = ["person", "cat", "dog"];
 
     const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
@@ -70,7 +70,7 @@ function harness(source, { classesStatus = 200 } = {}) {
                     json: async () => ({ detail: "Not Found" }),
                 };
             }
-            return ok({ classes: ["person", "cat", "dog"] });
+            return ok({ classes: vocabulary.slice() });
         }
         if (path === "/state") {
             // Snapshot before sleeping: that is what makes a slow reply stale.
@@ -97,7 +97,7 @@ function harness(source, { classesStatus = 200 } = {}) {
     };
     vm.createContext(ctx);
     vm.runInContext(fs.readFileSync(source, "utf8"), ctx);
-    return { els, app, posts, delays, status };
+    return { els, app, posts, delays, status, vocabulary };
 }
 
 const tests = {
@@ -115,10 +115,48 @@ const tests = {
 
     async "a missing /classes is reported, not swallowed"() {
         const h = harness(SOURCE, { classesStatus: 404 });
-        await sleep(30);
+        await sleep(60);
 
         assert.match(h.els.error.textContent, /Could not load classes/);
         assert.match(h.els.error.textContent, /404/);
+    },
+
+    async "a picker that failed to load recovers on a later poll"() {
+        // The real failure: one fetch at startup lost a race and the dropdown
+        // stayed empty for as long as the page was open.
+        const h = harness(SOURCE, { classesStatus: 404 });
+        await sleep(60);
+        assert.equal(h.els.label.options.length, 0);
+
+        h.status.classes = 200;
+        await sleep(700);
+        assert.deepEqual(
+            h.els.label.options.map((o) => o.value),
+            ["person", "cat", "dog"],
+            "polling must retry the class list",
+        );
+        assert.equal(h.els.error.textContent, "", "the error must clear");
+    },
+
+    async "the picker follows a change of vocabulary"() {
+        const h = harness(SOURCE);
+        await sleep(60);
+        assert.equal(h.els.label.options.length, 3);
+
+        h.vocabulary.length = 0;
+        h.vocabulary.push("robot", "mug");
+        h.app.classes_version = 1;
+
+        await sleep(700);
+        assert.deepEqual(h.els.label.options.map((o) => o.value), ["robot", "mug"]);
+    },
+
+    async "an unchanged vocabulary is not refetched"() {
+        const h = harness(SOURCE);
+        await sleep(60);
+        const first = h.els.label.options;
+        await sleep(700);
+        assert.equal(h.els.label.options, first, "must not rebuild every poll");
     },
 
     async "the rest of the panel still works when /classes is missing"() {
