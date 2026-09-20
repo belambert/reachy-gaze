@@ -76,12 +76,15 @@ class RemoteDetector:
     Frames are downscaled and JPEG-encoded before going over the network; boxes
     come back in downscaled coordinates and are rescaled to the source frame so
     callers can use them against the camera intrinsics.
+
+    The default width matches YOLO's native 640 px, so the model isn't handed an
+    upscaled image; at JPEG quality 75 a frame is only tens of kilobytes.
     """
 
     def __init__(
         self,
         url: str,
-        width: int = 512,
+        width: int = 640,
         quality: int = 75,
         timeout: float = 2.0,
     ) -> None:

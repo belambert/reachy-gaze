@@ -86,7 +86,7 @@ async def detect(
 def main(
     host: str = "0.0.0.0",
     port: int = 8100,
-    model: str = "yolo11n.pt",
+    model: str = "yolo11x.pt",
     device: str = "",
 ) -> None:
     """Serve COCO detection over HTTP."""

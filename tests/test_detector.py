@@ -105,3 +105,12 @@ def test_classes_fall_back_when_server_is_down():
 
 def test_classes_prefers_the_server(server):
     assert RemoteDetector(server).classes() == ["person", "cat"]
+
+
+def test_default_payload_matches_the_model_resolution(server, frame):
+    # 640 is YOLO's native size; sending less means handing it an upscale.
+    reply.clear()
+    reply.update({"detections": []})
+
+    RemoteDetector(server).detect(frame, ["cat"], 0.4)
+    assert seen["image"].width == 640
