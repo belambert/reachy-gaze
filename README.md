@@ -84,7 +84,10 @@ Pass `--verbose` to add uvicorn's per-request access log when debugging.
 
 Install it as a Reachy Mini app, then open the control panel at
 <http://localhost:8042>. Check that **Detector** points at the machine running
-the server, choose a class, and tick **Tracking enabled**.
+the server and choose a class.
+
+Tracking is **on from the moment the app starts** — untick **Tracking enabled**
+to stop it. That setting is not persisted, so a restart begins tracking again.
 
 The field is prefilled from `DEFAULT_SERVER_URL` in `tracker/main.py`. Set
 `TRACKER_SERVER_URL` to change it without editing code — worth doing if the

@@ -65,10 +65,12 @@ class State:
     """Shared state between the vision thread and the control loop."""
 
     def __init__(self) -> None:
-        """Start disabled, aimed at nothing, with no server contacted yet."""
+        """Start tracking, aimed at nothing, with no server contacted yet."""
         self.lock = threading.Lock()
 
-        self.enabled = False
+        # On by default: starting the app is the instruction to track, and a
+        # restart used to come back silently unticked.
+        self.enabled = True
         self.label = "person"
         self.conf = 0.4
         self.server_url = DEFAULT_SERVER_URL

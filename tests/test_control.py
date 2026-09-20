@@ -72,6 +72,13 @@ def test_commands_are_finite_and_well_formed(tracker):
         assert np.isfinite(antennas).all()
 
 
+def test_tracking_starts_on():
+    # Regression: a restart used to come back unticked, which reads exactly
+    # like a hang — the class list is fetched and then nothing else happens.
+    assert State().enabled is True
+    assert State().scan is True
+
+
 class TestHoldWindow:
     """The head keeps its aim for LOST_AFTER, and the panel must say so honestly."""
 
