@@ -153,7 +153,7 @@ class Tracker(ReachyMiniApp):
         period = 1.0 / CONTROL_HZ
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
         perk = 0.0
-        sweeping = False
+        was_scanning = False
         sweep_t0 = 0.0
         sweep_phase = 0.0
         t0 = time.monotonic()
@@ -189,10 +189,10 @@ class Tracker(ReachyMiniApp):
             # Start each sweep from wherever the head already is. Running the
             # sine off a fixed epoch meant it began at an arbitrary phase, so
             # losing a target swung the head to centre and then out again.
-            if scanning and not sweeping:
+            if scanning and not was_scanning:  # a sweep starts on this tick
                 sweep_t0 = now
                 sweep_phase = self._sweep_phase(smoother.rotation)
-            sweeping = scanning
+            was_scanning = scanning
 
             if not aimed:
                 goal = (
