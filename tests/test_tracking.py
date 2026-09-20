@@ -133,3 +133,43 @@ def test_center_normalization_round_trips(cx, cy):
 
 def test_frame_center_maps_to_origin():
     assert norm_center(box((W - 1) / 2, (H - 1) / 2), W, H) == pytest.approx((0.0, 0.0))
+
+
+class TestClassRefresh:
+    """The picker follows the server's vocabulary, not a hardcoded list."""
+
+    class _Stub:
+        url = "http://stub:8100"
+
+        def __init__(self, result):
+            self.result = result
+
+        def classes(self):
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+    def test_server_vocabulary_is_adopted(self):
+        from tracker.main import State, Tracker
+
+        state = State()
+        Tracker._refresh_classes(self._Stub(["cat", "robot", "mug"]), state)
+        assert state.classes == ["cat", "robot", "mug"]
+
+    def test_unreachable_server_keeps_the_last_list(self):
+        from tracker.detector import DetectorUnavailable
+        from tracker.main import State, Tracker
+
+        state = State()
+        before = list(state.classes)
+        Tracker._refresh_classes(self._Stub(DetectorUnavailable("down")), state)
+        assert state.classes == before, "the picker must not empty itself"
+
+    def test_a_later_failure_does_not_undo_a_good_fetch(self):
+        from tracker.detector import DetectorUnavailable
+        from tracker.main import State, Tracker
+
+        state = State()
+        Tracker._refresh_classes(self._Stub(["cat"]), state)
+        Tracker._refresh_classes(self._Stub(DetectorUnavailable("down")), state)
+        assert state.classes == ["cat"]

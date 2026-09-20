@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from tracker.detector import COCO_CLASSES, DetectorUnavailable, RemoteDetector
+from tracker.detector import DetectorUnavailable, RemoteDetector
 
 # Filled in by each test with what the stub should return; captured requests land
 # in `seen` so tests can assert on what actually went over the wire.
@@ -98,9 +98,10 @@ def test_unreachable_server_raises(frame):
         detector.detect(frame, ["cat"], 0.4)
 
 
-def test_classes_fall_back_when_server_is_down():
-    # The panel must still populate its picker with no server running.
-    assert RemoteDetector("http://127.0.0.1:1", timeout=0.3).classes() == COCO_CLASSES
+def test_classes_raises_when_server_is_down():
+    # The caller keeps the last known list; the detector does not invent one.
+    with pytest.raises(DetectorUnavailable):
+        RemoteDetector("http://127.0.0.1:1", timeout=0.3).classes()
 
 
 def test_classes_prefers_the_server(server):
