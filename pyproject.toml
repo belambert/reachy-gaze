@@ -6,16 +6,36 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gaze_tracker"
 version = "0.1.0"
-description = "Add your description here"
+description = "Point Reachy Mini's head at a named object — a person, a cat, a dog"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "reachy-mini"
+    "reachy-mini",
+    "pillow",  # the robot has no JPEG encoder; opencv is an optional extra
 ]
 keywords = ["reachy-mini-app"]
 
+[project.optional-dependencies]
+# Only needed on the machine that runs detection, not on the robot.
+server = [
+    "fastapi",
+    "torch",
+    "typer",
+    "ultralytics",
+    "uvicorn",
+]
+dev = [
+    "black",
+    "isort",
+    "mypy",
+    "pytest",
+]
+
 [project.entry-points."reachy_mini_apps"]
 gaze_tracker = "gaze_tracker.main:GazeTracker"
+
+[project.scripts]
+gaze-tracker-server = "gaze_tracker.server.app:cli"
 
 [tool.setuptools]
 package-dir = { "" = "." }
