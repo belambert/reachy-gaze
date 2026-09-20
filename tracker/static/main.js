@@ -11,13 +11,21 @@ let applied = 0;
 // poll overwriting what was typed a moment before it gets read back.
 const dirty = new Set();
 
+// Set if the class list could not be loaded. Kept apart from the app's own
+// error so a later successful poll cannot quietly paint over it.
+let loadError = "";
+
 async function request(path, options, keys = []) {
     const id = ++seq;
     let state;
     try {
-        state = await (await fetch(path, options)).json();
+        const response = await fetch(path, options);
+        // A 404 body is still valid JSON, so status has to be checked directly.
+        if (!response.ok) throw new Error(`${path} returned ${response.status}`);
+        state = await response.json();
     } catch (e) {
         badge("badge-detector", false, "app unreachable");
+        el("error").textContent = e.message;
         return;
     }
     keys.forEach((key) => dirty.delete(key));
@@ -65,7 +73,7 @@ function apply(state) {
         marker.style.display = "none";
     }
 
-    el("error").textContent = state.error || "";
+    el("error").textContent = state.error || loadError || "";
 }
 
 function badge(id, ok, text) {
@@ -83,10 +91,17 @@ function applyUrl() {
 async function init() {
     let classes = [];
     try {
-        ({ classes } = await (await fetch("/classes")).json());
+        const response = await fetch("/classes");
+        if (!response.ok) throw new Error(`/classes returned ${response.status}`);
+        const body = await response.json();
+        if (!Array.isArray(body.classes)) throw new Error("/classes sent no list");
+        classes = body.classes;
     } catch (e) {
-        // Losing the picker must not also cost us the status readout.
+        // Losing the picker must not cost us the controls or the status readout,
+        // and the reason has to be visible rather than only in the console.
         badge("badge-detector", false, "app unreachable");
+        loadError = `Could not load classes: ${e.message}`;
+        el("error").textContent = loadError;
     }
     el("label").append(...classes.map((name) => new Option(name, name)));
 
