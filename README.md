@@ -62,6 +62,7 @@ detections are empty" without a line per frame:
 
     Serving yolo11x.pt on mps at http://0.0.0.0:8100
     first contact from 10.0.0.42
+    served class list (80 classes) to 10.0.0.42
     10.0.0.42: 118 req in 10s (11.8/s), 41 ms avg, 1.2 det/req
     10.0.0.42 went quiet after 118 requests
 
@@ -79,6 +80,11 @@ server's address comes from DHCP and moves.
 
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.
+
+The class picker is populated from the server, refreshed whenever the Detector
+address changes, so it reflects whatever `--model` was loaded rather than a
+fixed list. Until a server has been reached it falls back to the bundled COCO
+names, and an unreachable server leaves the last known list in place.
 
 ## Choosing a model
 
