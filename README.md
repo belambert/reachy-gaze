@@ -134,12 +134,22 @@ Constants live at the top of `tracker/main.py`:
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 1.5     | Seconds without a detection before the head gives up      |
 
-`MAX_HEAD_PULL` is the one to reach for if the motion still looks abrupt: it
-bounds how much commanded velocity can change in a single tick, so lowering it
-trades responsiveness for smoothness directly. Raising it makes the head chase
-harder. Simulated against a subject crossing the view with detection at 12 Hz,
-the current values cut peak jerk about fourfold versus a plain first-order lag,
-costing roughly 0.7° of tracking lag.
+`MAX_HEAD_PULL` is only the starting value — the control panel's
+**Responsiveness** slider changes it live, so there is no need to edit code and
+reinstall to find a setting you like. It bounds how much commanded velocity can
+change in a single tick, which is the dial that trades smoothness against
+chasing power:
+
+| Responsiveness | Peak jerk | Peak speed |
+| -------------- | --------- | ---------- |
+| 4              | 2.2       | 10 °/s     |
+| 20 (default)   | 11.1      | 52 °/s     |
+| 60             | 33.3      | 150 °/s    |
+
+Every setting still converges without overshoot; lower simply takes longer.
+Simulated against a subject crossing the view with detection at 12 Hz, the
+default cuts peak jerk about fourfold versus a plain first-order lag, costing
+roughly 0.7° of tracking lag.
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
 are constructor arguments on `TargetSelector` in `tracker/tracking.py`.
