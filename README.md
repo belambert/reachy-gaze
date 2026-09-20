@@ -41,10 +41,18 @@ damped second-order follower. That matters more than it sounds: the goal steps
 with every detection, and a first-order lag reaches a stepped setpoint with a
 velocity discontinuity each time, which is exactly what reads as jerky. Carrying
 angular velocity as state keeps velocity continuous, and capping the follower's
-pull bounds how much it can change per tick. Target selection reuses the approach in the SDK's own
+pull bounds how much it can change per tick.
+
+Target selection reuses the approach in the SDK's own
 `reachy_mini.vision.face_tracking`: acquire the largest box, then follow the
 nearest one frame to frame, with a max-jump gate so the head doesn't snap
 between two cats and a miss counter so it lets go once the real one leaves.
+
+When detections stop, the head keeps its aim on the last known position for
+`LOST_AFTER` seconds before it starts sweeping, so a subject that steps behind
+something is still being watched when it reappears. The panel distinguishes the
+two: **locked** while sightings are arriving, **holding** with the age of the
+last one while the head waits it out.
 
 ## Running it
 
@@ -132,7 +140,8 @@ Constants live at the top of `tracker/main.py`:
 | `MAX_HEAD_PULL`  | 20.0    | rad/s² cap on the follower's pull; **lower is gentler**   |
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
-| `LOST_AFTER`     | 1.5     | Seconds without a detection before the head gives up      |
+| `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
+| `STALE_AFTER`    | 1.0     | Seconds before the panel calls a lock held rather than live |
 
 `MAX_HEAD_PULL` is only the starting value — the control panel's
 **Responsiveness** slider changes it live, so there is no need to edit code and
