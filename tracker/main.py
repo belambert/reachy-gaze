@@ -36,6 +36,8 @@ SMOOTH_TAU = 0.09  # follower time constant; larger is smoother and laggier
 MAX_HEAD_SPEED = 3.5  # rad/s ceiling on commanded head rotation
 MAX_HEAD_PULL = 20.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
 BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
+SCAN_DEGREES = 35.0  # half-width of the search sweep
+SCAN_HZ = 0.08  # sweep rate; faster keeps the servos out of their judder range
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
@@ -151,6 +153,9 @@ class Tracker(ReachyMiniApp):
         period = 1.0 / CONTROL_HZ
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
         lock_level = 0.0
+        sweeping = False
+        sweep_t0 = 0.0
+        sweep_phase = 0.0
         t0 = time.monotonic()
         last = t0
         next_tick = t0
@@ -176,16 +181,21 @@ class Tracker(ReachyMiniApp):
                 scanning = state.enabled and state.scan and not fresh
                 smoother.max_pull = state.pull  # tunable live from the panel
 
-            # One eased scalar drives both postures, so nothing steps on a
-            # transition: antennas blend, and the sweep grows in rather than
-            # starting at full swing.
             lock_level += (float(fresh) - lock_level) * (
                 1.0 - math.exp(-dt / BLEND_TAU)
             )
 
+            # Start each sweep from wherever the head already is. Running the
+            # sine off a fixed epoch meant it began at an arbitrary phase, so
+            # losing a target swung the head to centre and then out again.
+            if scanning and not sweeping:
+                sweep_t0 = now
+                sweep_phase = self._sweep_phase(smoother.rotation)
+            sweeping = scanning
+
             if not fresh:
                 goal = (
-                    self._idle_pose(now - t0, 1.0 - lock_level)
+                    self._idle_pose(now - sweep_t0, sweep_phase)
                     if scanning
                     else Rotation.identity()
                 )
@@ -316,11 +326,21 @@ class Tracker(ReachyMiniApp):
         logger.info("Fetched %d classes from %s", len(classes), detector.url)
 
     @staticmethod
-    def _idle_pose(t: float, scale: float) -> Rotation:
-        """A slow yaw sweep, so a lost target has a chance of wandering back in."""
-        return Rotation.from_euler(
-            "z", scale * 35.0 * math.sin(2 * math.pi * 0.08 * t), degrees=True
-        )
+    def _idle_pose(t: float, phase: float = 0.0) -> Rotation:
+        """A slow yaw sweep, so a lost target has a chance of wandering back in.
+
+        `t` is seconds since this sweep began, not since the app started: the
+        phase is chosen per sweep so it picks up from the head's current yaw.
+        """
+        angle = SCAN_DEGREES * math.sin(2 * math.pi * SCAN_HZ * t + phase)
+        return Rotation.from_euler("z", angle, degrees=True)
+
+    @staticmethod
+    def _sweep_phase(rotation: Rotation) -> float:
+        """The sweep phase whose starting yaw matches `rotation`."""
+        yaw = math.degrees(rotation.as_euler("zyx")[0])
+        # asin keeps the sweep heading outward from here rather than reversing.
+        return math.asin(max(-1.0, min(1.0, yaw / SCAN_DEGREES)))
 
     @staticmethod
     def _antennas(lock_level: float, t: float) -> np.ndarray:
