@@ -51,6 +51,14 @@ Selection is class-blind: the four labels only decide what gets detected, and
 from there the head follows a box, whatever it is labelled. The panel reports
 which class the current target came back as.
 
+After `DWELL` seconds on one target the head deliberately leaves it and scans
+for `SURVEY_FOR` seconds, to see who else is about. It remembers where that
+target was and ignores sightings within `AVOID_DEGREES` of it for the duration,
+so the scan doesn't simply snap straight back. Find someone else and it switches
+and the dwell starts again; find nobody and the old target becomes fair game,
+with a full dwell of its own. The panel says **looking around** while this is
+happening — the lock isn't lost, it's being ignored on purpose.
+
 When detections stop, the head keeps its aim on the last known position for
 `LOST_AFTER` seconds before it starts scanning the room — nearly all the way
 round, and up and down — so a subject that steps behind something is still
@@ -148,6 +156,9 @@ Constants live at the top of `tracker/main.py`:
 | `MAX_HEAD_PULL`  | 10.0    | rad/s² cap on the follower's pull; **lower is gentler**   |
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
+| `DWELL`          | 20.0    | Seconds on one target before looking around for others    |
+| `SURVEY_FOR`     | 8.0     | Seconds spent looking around before settling for what we had |
+| `AVOID_DEGREES`  | 25.0    | A sighting this near the target we left is that same target |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
 | `STALE_AFTER`    | 1.0     | Seconds before the panel calls a lock held rather than live |
 | `SCAN_DEGREES`   | 60.0    | Half-width of the scan                                    |
