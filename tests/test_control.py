@@ -37,6 +37,17 @@ def drive(tracker, mini, state):
     return mini.commands
 
 
+def yaw_after(tracker, state, ticks):
+    """Commanded yaw in degrees after running the control loop for `ticks`."""
+    from scipy.spatial.transform import Rotation
+
+    mini = FakeMini(stop_after=ticks)
+    drive(tracker, mini, state)
+    return np.degrees(
+        Rotation.from_matrix(mini.commands[-1][0][:3, :3]).as_euler("ZYX")[0]
+    )
+
+
 def test_survives_a_pose_that_is_not_published_yet(tracker):
     # Regression: this used to raise straight out of the control loop, which
     # took down the app and left it restarting in a loop.
@@ -143,23 +154,14 @@ class TestSurvey:
         state.surveying = surveying
         return state
 
-    def yaw_after(self, tracker, state, ticks):
-        mini = FakeMini(stop_after=ticks)
-        drive(tracker, mini, state)
-        from scipy.spatial.transform import Rotation
-
-        return np.degrees(
-            Rotation.from_matrix(mini.commands[-1][0][:3, :3]).as_euler("ZYX")[0]
-        )
-
     def test_a_live_target_is_followed(self, tracker):
         # Baseline: without a survey the head closes on the target, to -40.
-        assert self.yaw_after(tracker, self.loaded(False), 60) < -1.0
+        assert yaw_after(tracker, self.loaded(False), 60) < -1.0
 
     def test_a_survey_leaves_a_live_target(self, tracker):
         # The whole point: a perfectly good target is abandoned on purpose, and
         # the scan from rest goes the other way entirely.
-        assert self.yaw_after(tracker, self.loaded(True), 60) > 1.0
+        assert yaw_after(tracker, self.loaded(True), 60) > 1.0
 
     def test_the_panel_is_told(self):
         assert self.loaded(True).snapshot()["surveying"] is True
@@ -198,3 +200,51 @@ class TestApart:
         from tracker.main import AVOID_DEGREES
 
         assert 10.0 < AVOID_DEGREES < 60.0
+
+
+class TestSurveyEnd:
+    """A survey that finds nobody must not drag the head back to a stale aim.
+
+    Regression: LOST_AFTER (10s) outlives a survey (8s), so when `surveying`
+    went false the old goal was still inside the hold window and the control
+    loop drove straight back to where the target had been — which on hardware
+    looked like the robot refusing to leave the same cat alone.
+    """
+
+    def stale_aim(self):
+        """A target seen 8 seconds ago, 40 degrees the way the scan won't go."""
+        import time
+
+        from scipy.spatial.transform import Rotation
+
+        from tracker.main import SURVEY_FOR
+
+        state = State()
+        state.goal = Rotation.from_euler("Z", -40, degrees=True)
+        state.center = (-0.5, 0.0)
+        state.last_seen = time.monotonic() - SURVEY_FOR
+        return state
+
+    def test_the_window_really_does_outlive_a_survey(self):
+        from tracker.main import LOST_AFTER, SURVEY_FOR
+
+        assert SURVEY_FOR < LOST_AFTER, "otherwise there is nothing to guard"
+        assert self.stale_aim().snapshot()["locked"] is True
+
+    def test_a_remembered_aim_pulls_the_head_back(self, tracker):
+        # Why forgetting matters: left alone, the stale goal wins.
+        assert yaw_after(tracker, self.stale_aim(), 60) < -1.0
+
+    def test_forgetting_the_target_leaves_the_head_scanning(self, tracker):
+        state = self.stale_aim()
+        state.forget_target()
+        assert yaw_after(tracker, state, 60) > 1.0, "must scan on, not go back"
+
+    def test_forgetting_clears_what_the_panel_shows(self):
+        state = self.stale_aim()
+        state.forget_target()
+
+        snap = state.snapshot()
+        assert snap["locked"] is False
+        assert snap["seen_ago"] is None
+        assert snap["center"] is None, "a stale marker is a lie about the target"
