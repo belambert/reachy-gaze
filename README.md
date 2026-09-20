@@ -5,7 +5,7 @@ colorFrom: red
 colorTo: blue
 sdk: static
 pinned: false
-short_description: Point Reachy Mini's head at a person, a cat, or a dog
+short_description: Point Reachy Mini's head at people, cats, dogs and birds
 tags:
  - reachy_mini
  - reachy_mini_python_app
@@ -13,9 +13,9 @@ tags:
 
 # Tracker
 
-Reachy Mini follows a named object with its head. Pick a class in the control
-panel — `person`, `cat`, `dog`, or any of the other 80 COCO classes — and the
-head tracks it across the room, with the body turning to extend the reach.
+Reachy Mini follows people, cats, dogs and birds with its head, tracking them
+across the room with the body turning to extend the reach. It looks for all
+four at once and locks onto whichever makes the better target.
 
 Detection runs **off-board**, on a machine with a GPU, because the robot's Pi is
 already busy with motor control. The robot sends downscaled JPEGs over the
@@ -47,6 +47,9 @@ Target selection reuses the approach in the SDK's own
 `reachy_mini.vision.face_tracking`: acquire the largest box, then follow the
 nearest one frame to frame, with a max-jump gate so the head doesn't snap
 between two cats and a miss counter so it lets go once the real one leaves.
+Selection is class-blind: the four labels only decide what gets detected, and
+from there the head follows a box, whatever it is labelled. The panel reports
+which class the current target came back as.
 
 When detections stop, the head keeps its aim on the last known position for
 `LOST_AFTER` seconds before it starts sweeping, so a subject that steps behind
@@ -84,7 +87,7 @@ Pass `--verbose` to add uvicorn's per-request access log when debugging.
 
 Install it as a Reachy Mini app, then open the control panel at
 <http://localhost:8042>. Check that **Detector** points at the machine running
-the server and choose a class.
+the server.
 
 Tracking is **on from the moment the app starts** — untick **Tracking enabled**
 to stop it. That setting is not persisted, so a restart begins tracking again.
@@ -96,10 +99,11 @@ server's address comes from DHCP and moves.
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.
 
-The class picker is populated from the server, refreshed whenever the Detector
-address changes, so it reflects whatever `--model` was loaded rather than a
-fixed list. Until a server has been reached it falls back to the bundled COCO
-names, and an unreachable server leaves the last known list in place.
+What it hunts for is `TRACK_LABELS` in `tracker/main.py` — `person`, `cat`,
+`dog`, `bird`. Any COCO class works there. Whenever the Detector address
+changes the app checks the labels against the server's vocabulary and logs a
+warning for any it doesn't know, because the server quietly detects
+*everything* when it recognises none of them.
 
 ## Choosing a model
 
