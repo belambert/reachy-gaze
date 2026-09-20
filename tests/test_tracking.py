@@ -5,11 +5,11 @@ from scipy.spatial.transform import Rotation
 from tracker.detector import Detection
 from tracker.tracking import (
     CenterFilter,
+    PoseSmoother,
     TargetSelector,
     norm_center,
     pixel_center,
     pose_matrix,
-    slew,
 )
 
 W, H = 640, 480
@@ -97,25 +97,80 @@ class TestCenterFilter:
         assert filt.update((-0.5, -0.5)) == (-0.5, -0.5)
 
 
-class TestSlew:
-    def test_zero_alpha_holds_and_one_arrives(self):
-        current = Rotation.identity()
-        goal = Rotation.from_euler("z", 30, degrees=True)
+class TestPoseSmoother:
+    """Smoothness is the point: velocity must stay continuous under a stepping goal."""
 
-        assert slew(current, goal, 0.0).magnitude() == pytest.approx(0.0)
-        assert slew(current, goal, 1.0).approx_equal(goal, atol=1e-9)
+    DT = 1 / 50
 
-    def test_partial_step_moves_proportionally(self):
+    def run(self, smoother, goal, ticks):
+        """Step `ticks` times, returning the angle to goal and speed at each."""
+        out = []
+        for _ in range(ticks):
+            smoother.step(goal, self.DT)
+            err = float((goal * smoother.rotation.inv()).magnitude())
+            out.append((err, smoother.speed))
+        return out
+
+    def test_converges_to_the_goal(self):
+        smoother = PoseSmoother(tau=0.09)
+        goal = Rotation.from_euler("zy", [30, -12], degrees=True)
+        assert self.run(smoother, goal, 200)[-1][0] == pytest.approx(0.0, abs=1e-3)
+
+    def test_starts_from_rest_rather_than_jumping(self):
+        # The first-order version commanded err/tau immediately; this must not.
+        smoother = PoseSmoother(tau=0.09)
         goal = Rotation.from_euler("z", 40, degrees=True)
-        stepped = slew(Rotation.identity(), goal, 0.25)
-        assert np.degrees(stepped.magnitude()) == pytest.approx(10.0, abs=1e-6)
+        first_speed = self.run(smoother, goal, 1)[0][1]
+        assert first_speed < 0.1 * (goal.magnitude() / 0.09)
 
-    def test_repeated_steps_converge(self):
-        current = Rotation.identity()
-        goal = Rotation.from_euler("zy", [35, -10], degrees=True)
-        for _ in range(200):
-            current = slew(current, goal, 0.1)
-        assert current.approx_equal(goal, atol=1e-6)
+    def test_velocity_stays_continuous_when_the_goal_steps(self):
+        smoother = PoseSmoother(tau=0.09)
+        near = Rotation.from_euler("z", 5, degrees=True)
+        self.run(smoother, near, 60)  # settle
+
+        before = smoother.speed
+        far = Rotation.from_euler("z", 45, degrees=True)
+        smoother.step(far, self.DT)
+        # A 40 degree jump must not translate into an instant velocity jump.
+        assert abs(smoother.speed - before) < 0.5
+
+    def test_does_not_overshoot(self):
+        smoother = PoseSmoother(tau=0.09)
+        goal = Rotation.from_euler("z", 30, degrees=True)
+        angles = [
+            np.degrees(smoother.step(goal, self.DT).as_euler("zyx")[0])
+            for _ in range(300)
+        ]
+        assert max(angles) <= 30.0 + 1e-6, "critical damping must not overshoot"
+
+    def test_approach_is_monotonic(self):
+        smoother = PoseSmoother(tau=0.09)
+        goal = Rotation.from_euler("z", 25, degrees=True)
+        errs = [e for e, _ in self.run(smoother, goal, 200)]
+        assert all(b <= a + 1e-9 for a, b in zip(errs, errs[1:]))
+
+    def test_speed_is_clamped(self):
+        smoother = PoseSmoother(tau=0.02, max_speed=1.0)
+        goal = Rotation.from_euler("z", 170, degrees=True)
+        assert max(s for _, s in self.run(smoother, goal, 100)) <= 1.0 + 1e-9
+
+    def test_a_long_frame_does_not_diverge(self):
+        # Sub-stepping must keep explicit integration stable when dt is big.
+        smoother = PoseSmoother(tau=0.05)
+        goal = Rotation.from_euler("z", 40, degrees=True)
+        for _ in range(50):
+            smoother.step(goal, 0.1)
+        assert smoother.speed < 10.0
+        assert float((goal * smoother.rotation.inv()).magnitude()) == pytest.approx(
+            0.0, abs=1e-3
+        )
+
+    def test_reset_returns_to_rest(self):
+        smoother = PoseSmoother(tau=0.09)
+        self.run(smoother, Rotation.from_euler("z", 30, degrees=True), 20)
+        smoother.reset()
+        assert smoother.speed == 0.0
+        assert smoother.rotation.magnitude() == pytest.approx(0.0)
 
 
 def test_pose_matrix_is_a_pure_rotation():
@@ -173,3 +228,32 @@ class TestClassRefresh:
         Tracker._refresh_classes(self._Stub(["cat"]), state)
         Tracker._refresh_classes(self._Stub(DetectorUnavailable("down")), state)
         assert state.classes == ["cat"]
+
+
+class TestPosture:
+    """Lock and loss must not step the commanded antennas or the sweep."""
+
+    def test_antennas_are_continuous_across_the_transition(self):
+        from tracker.main import Tracker
+
+        t = 3.0
+        # The blend scalar moves gradually, so neighbouring levels must too.
+        a = Tracker._antennas(0.50, t)[0]
+        b = Tracker._antennas(0.51, t)[0]
+        assert abs(b - a) < np.deg2rad(1.0)
+
+    def test_antenna_endpoints_are_wag_and_perk(self):
+        from tracker.main import Tracker
+
+        t = 0.0  # sine is zero here, so the wag term vanishes
+        assert Tracker._antennas(1.0, t)[0] == pytest.approx(np.deg2rad(20.0))
+        assert Tracker._antennas(0.0, t)[0] == pytest.approx(0.0)
+
+    def test_sweep_grows_in_from_nothing(self):
+        from tracker.main import Tracker
+
+        t = 3.0
+        assert Tracker._idle_pose(t, 0.0).magnitude() == pytest.approx(0.0)
+        small = Tracker._idle_pose(t, 0.1).magnitude()
+        full = Tracker._idle_pose(t, 1.0).magnitude()
+        assert small < full
