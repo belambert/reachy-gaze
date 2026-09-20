@@ -5,6 +5,7 @@
     --text: #e6e9ef;
     --muted: #949cab;
     --ok: #3ecf8e;
+    --warn: #e0a83c;
     --bad: #e5604d;
     --accent: #5b9dff;
 }
@@ -140,6 +141,11 @@ code {
 
 .badge.ok {
     color: var(--ok);
+}
+
+/* Still aimed at the target, but nothing has been seen there for a while. */
+.badge.warn {
+    color: var(--warn);
 }
 
 .badge.bad {

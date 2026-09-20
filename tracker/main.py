@@ -36,7 +36,8 @@ SMOOTH_TAU = 0.09  # follower time constant; larger is smoother and laggier
 MAX_HEAD_SPEED = 3.5  # rad/s ceiling on commanded head rotation
 MAX_HEAD_PULL = 20.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
 BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
-LOST_AFTER = 1.5  # seconds without a detection before giving up the lock
+LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
+STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
 # Prefilled in the control panel. Override without editing code by setting
@@ -88,9 +89,10 @@ class State:
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
         with self.lock:
-            locked = (
-                self.goal is not None and time.monotonic() - self.last_seen < LOST_AFTER
+            seen_ago = (
+                time.monotonic() - self.last_seen if self.goal is not None else None
             )
+            locked = seen_ago is not None and seen_ago < LOST_AFTER
             return {
                 "enabled": self.enabled,
                 "label": self.label,
@@ -104,6 +106,7 @@ class State:
                 "fps": round(self.fps, 1),
                 "center": self.center,
                 "classes_version": self.classes_version,
+                "seen_ago": round(seen_ago, 1) if locked else None,
             }
 
 

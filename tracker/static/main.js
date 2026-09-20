@@ -1,5 +1,9 @@
 const el = (id) => document.getElementById(id);
 
+// Mirrors STALE_AFTER in the app. Only affects how the lock badge reads, so a
+// drift between the two costs nothing but wording.
+const STALE_AFTER = 1.0;
+
 // Responses can arrive out of order — a poll issued before a write can resolve
 // after it — so every request takes a sequence number and an older response is
 // never allowed to paint over a newer one.
@@ -29,7 +33,7 @@ async function request(path, options, keys = []) {
         if (!response.ok) throw new Error(`${path} returned ${response.status}`);
         state = await response.json();
     } catch (e) {
-        badge("badge-detector", false, "app unreachable");
+        badge("badge-detector", "bad", "app unreachable");
         el("error").textContent = e.message;
         return;
     }
@@ -93,8 +97,22 @@ function apply(state) {
     el("pull-value").textContent = Number(el("pull").value).toFixed(0);
     el("server-url").classList.toggle("unsaved", dirty.has("server_url"));
 
-    badge("badge-detector", state.detector_ok, state.detector_ok ? "detector up" : "detector down");
-    badge("badge-lock", state.locked, state.locked ? `locked: ${state.label}` : "searching");
+    badge(
+        "badge-detector",
+        state.detector_ok ? "ok" : "bad",
+        state.detector_ok ? "detector up" : "detector down",
+    );
+
+    // The head holds its aim long after the last sighting, so saying "locked"
+    // for all of it would misreport a target that left seconds ago.
+    if (!state.locked) {
+        badge("badge-lock", "bad", "searching");
+    } else if (state.seen_ago < STALE_AFTER) {
+        badge("badge-lock", "ok", `locked: ${state.label}`);
+    } else {
+        badge("badge-lock", "warn", `holding: ${state.label} (${Math.round(state.seen_ago)}s)`);
+    }
+
     el("badge-fps").textContent = state.detector_ok ? `${state.fps} fps` : "– fps";
 
     const marker = el("marker");
@@ -109,11 +127,12 @@ function apply(state) {
     el("error").textContent = state.error || loadError || "";
 }
 
-function badge(id, ok, text) {
+function badge(id, tone, text) {
     const node = el(id);
     node.textContent = text;
-    node.classList.toggle("ok", ok);
-    node.classList.toggle("bad", !ok);
+    for (const name of ["ok", "warn", "bad"]) {
+        node.classList.toggle(name, name === tone);
+    }
 }
 
 function applyUrl() {
@@ -122,22 +141,8 @@ function applyUrl() {
 }
 
 async function init() {
-    let classes = [];
-    try {
-        const response = await fetch("/classes");
-        if (!response.ok) throw new Error(`/classes returned ${response.status}`);
-        const body = await response.json();
-        if (!Array.isArray(body.classes)) throw new Error("/classes sent no list");
-        classes = body.classes;
-    } catch (e) {
-        // Losing the picker must not cost us the controls or the status readout,
-        // and the reason has to be visible rather than only in the console.
-        badge("badge-detector", false, "app unreachable");
-        loadError = `Could not load classes: ${e.message}`;
-        el("error").textContent = loadError;
-    }
-    el("label").append(...classes.map((name) => new Option(name, name)));
-
+    // The picker is filled by polling, not here: a one-shot fetch at startup is
+    // exactly what used to leave the dropdown empty when it lost a race.
     el("label").addEventListener("change", (e) => {
         dirty.add("label");
         write({ label: e.target.value });
