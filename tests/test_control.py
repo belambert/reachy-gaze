@@ -72,6 +72,15 @@ def test_commands_are_finite_and_well_formed(tracker):
         assert np.isfinite(antennas).all()
 
 
+def test_tracked_labels_are_real_coco_classes():
+    # A typo here is near-silent: the server recognises none of the labels and
+    # falls back to detecting everything, so the head chases furniture.
+    from tracker.detector import COCO_CLASSES
+    from tracker.main import TRACK_LABELS
+
+    assert set(TRACK_LABELS) <= set(COCO_CLASSES)
+
+
 def test_tracking_starts_on():
     # Regression: a restart used to come back unticked, which reads exactly
     # like a hang — the class list is fetched and then nothing else happens.

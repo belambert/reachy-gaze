@@ -192,8 +192,8 @@ def test_frame_center_maps_to_origin():
     assert norm_center(box((W - 1) / 2, (H - 1) / 2), W, H) == pytest.approx((0.0, 0.0))
 
 
-class TestClassRefresh:
-    """The picker follows the server's vocabulary, not a hardcoded list."""
+class TestVocabularyCheck:
+    """A server that cannot see our labels detects everything instead, silently."""
 
     class _Stub:
         url = "http://stub:8100"
@@ -206,30 +206,28 @@ class TestClassRefresh:
                 raise self.result
             return self.result
 
-    def test_server_vocabulary_is_adopted(self):
-        from tracker.main import State, Tracker
+    def test_a_missing_label_is_named(self, caplog):
+        from tracker.main import TRACK_LABELS, Tracker
 
-        state = State()
-        Tracker._refresh_classes(self._Stub(["cat", "robot", "mug"]), state)
-        assert state.classes == ["cat", "robot", "mug"]
+        with caplog.at_level("WARNING"):
+            Tracker._check_vocabulary(self._Stub([TRACK_LABELS[0]]))
+        for label in TRACK_LABELS[1:]:
+            assert label in caplog.text
 
-    def test_unreachable_server_keeps_the_last_list(self):
+    def test_a_complete_vocabulary_does_not_warn(self, caplog):
+        from tracker.main import TRACK_LABELS, Tracker
+
+        with caplog.at_level("WARNING"):
+            Tracker._check_vocabulary(self._Stub(list(TRACK_LABELS) + ["mug"]))
+        assert caplog.text == ""
+
+    def test_an_unreachable_server_is_not_fatal(self, caplog):
         from tracker.detector import DetectorUnavailable
-        from tracker.main import State, Tracker
+        from tracker.main import Tracker
 
-        state = State()
-        before = list(state.classes)
-        Tracker._refresh_classes(self._Stub(DetectorUnavailable("down")), state)
-        assert state.classes == before, "the picker must not empty itself"
-
-    def test_a_later_failure_does_not_undo_a_good_fetch(self):
-        from tracker.detector import DetectorUnavailable
-        from tracker.main import State, Tracker
-
-        state = State()
-        Tracker._refresh_classes(self._Stub(["cat"]), state)
-        Tracker._refresh_classes(self._Stub(DetectorUnavailable("down")), state)
-        assert state.classes == ["cat"]
+        with caplog.at_level("WARNING"):
+            Tracker._check_vocabulary(self._Stub(DetectorUnavailable("down")))
+        assert "down" in caplog.text
 
 
 class TestPosture:
@@ -332,46 +330,3 @@ class TestPullTuning:
                 for _ in range(400)
             ]
             assert max(angles) <= 30.0 + 1e-6, f"pull={pull} overshot"
-
-
-class TestClassVersion:
-    """The panel reloads the picker off this counter, so it must move honestly."""
-
-    class _Stub:
-        url = "http://stub:8100"
-
-        def __init__(self, result):
-            self.result = result
-
-        def classes(self):
-            return self.result
-
-    def test_an_unchanged_list_does_not_bump_the_version(self):
-        from tracker.main import State, Tracker
-
-        state = State()
-        Tracker._refresh_classes(self._Stub(list(state.classes)), state)
-        assert state.classes_version == 0, "no change means no reload"
-
-    def test_a_changed_list_bumps_the_version(self):
-        from tracker.main import State, Tracker
-
-        state = State()
-        Tracker._refresh_classes(self._Stub(["cat", "dog"]), state)
-        assert state.classes_version == 1
-        assert state.snapshot()["classes_version"] == 1
-
-    def test_a_failed_fetch_leaves_the_version_alone(self):
-        from tracker.detector import DetectorUnavailable
-        from tracker.main import State, Tracker
-
-        state = State()
-
-        class Down:
-            url = "http://down"
-
-            def classes(self):
-                raise DetectorUnavailable("down")
-
-        Tracker._refresh_classes(Down(), state)
-        assert state.classes_version == 0

@@ -20,7 +20,7 @@ from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
-from tracker.detector import COCO_CLASSES, DetectorUnavailable, RemoteDetector
+from tracker.detector import DetectorUnavailable, RemoteDetector
 from tracker.tracking import (
     CenterFilter,
     PoseSmoother,
@@ -29,6 +29,9 @@ from tracker.tracking import (
     pixel_center,
     pose_matrix,
 )
+
+# Hunted for together; the selector picks whichever is the better target.
+TRACK_LABELS = ["person", "cat", "dog", "bird"]
 
 CONTROL_HZ = 50.0
 DETECT_HZ = 12.0  # request ceiling; the server is usually quicker than this
@@ -53,7 +56,6 @@ class Config(BaseModel):
     """Settings the control panel can change while the app runs."""
 
     enabled: bool | None = None
-    label: str | None = None
     conf: float | None = None
     server_url: str | None = None
     scan: bool | None = None
@@ -71,7 +73,8 @@ class State:
         # On by default: starting the app is the instruction to track, and a
         # restart used to come back silently unticked.
         self.enabled = True
-        self.label = "person"
+        # What the head is currently locked onto, not what it is looking for.
+        self.label = ""
         self.conf = 0.4
         self.server_url = DEFAULT_SERVER_URL
         self.scan = True
@@ -84,11 +87,6 @@ class State:
         self.error = ""
         self.fps = 0.0
         self.center: tuple[float, float] | None = None
-        # Seeded so the picker works before any server has been reached.
-        self.classes = list(COCO_CLASSES)
-        # Bumped whenever the list actually changes, so the panel knows to
-        # re-read it rather than polling 80 strings several times a second.
-        self.classes_version = 0
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -99,6 +97,7 @@ class State:
             locked = seen_ago is not None and seen_ago < LOST_AFTER
             return {
                 "enabled": self.enabled,
+                "labels": TRACK_LABELS,
                 "label": self.label,
                 "conf": self.conf,
                 "server_url": self.server_url,
@@ -109,7 +108,6 @@ class State:
                 "error": self.error,
                 "fps": round(self.fps, 1),
                 "center": self.center,
-                "classes_version": self.classes_version,
                 "seen_ago": round(seen_ago, 1) if locked else None,
             }
 
@@ -247,24 +245,19 @@ class Tracker(ReachyMiniApp):
         while not stop_event.is_set():
             started = time.monotonic()
             with state.lock:
-                enabled, label, conf, url = (
-                    state.enabled,
-                    state.label,
-                    state.conf,
-                    state.server_url,
-                )
+                enabled, conf, url = state.enabled, state.conf, state.server_url
                 head_pose = state.head_pose
 
-            # Ahead of the enabled check: pointing at a new server should
-            # refresh the picker straight away, not on the next tracking run.
+            # Ahead of the enabled check: a new server should be vetted straight
+            # away, not on the next tracking run.
             if detector is None or url != detector_url:
                 detector = RemoteDetector(url)
                 detector_url = url
                 selector.reset()
                 smoother.reset()
-                self._refresh_classes(detector, state)
+                self._check_vocabulary(detector)
 
-            if not enabled or not label:
+            if not enabled:
                 selector.reset()
                 smoother.reset()
                 stop_event.wait(0.2)
@@ -276,7 +269,7 @@ class Tracker(ReachyMiniApp):
                 continue
 
             try:
-                dets = detector.detect(frame, [label], conf)
+                dets = detector.detect(frame, TRACK_LABELS, conf)
             except DetectorUnavailable as e:
                 with state.lock:
                     state.detector_ok = False
@@ -308,24 +301,30 @@ class Tracker(ReachyMiniApp):
                     )
                     state.last_seen = time.monotonic()
                     state.center = center
+                    state.label = det.label
 
             elapsed = time.monotonic() - started
             if elapsed < period:
                 stop_event.wait(period - elapsed)
 
     @staticmethod
-    def _refresh_classes(detector: RemoteDetector, state: State) -> None:
-        """Adopt the server's vocabulary, keeping the last known one on failure."""
+    def _check_vocabulary(detector: RemoteDetector) -> None:
+        """Warn if the server's model cannot see what we are looking for.
+
+        The server silently detects *everything* when it recognises none of the
+        requested labels, so an unknown one would look like a wildly distracted
+        robot rather than a configuration mistake.
+        """
         try:
             classes = detector.classes()
         except DetectorUnavailable as e:
             logger.warning("Could not fetch class list: %s", e)
             return
-        with state.lock:
-            if classes != state.classes:
-                state.classes = classes
-                state.classes_version += 1
-        logger.info("Fetched %d classes from %s", len(classes), detector.url)
+        missing = [label for label in TRACK_LABELS if label not in classes]
+        if missing:
+            logger.warning("%s does not detect %s", detector.url, ", ".join(missing))
+        else:
+            logger.info("%s detects all of %s", detector.url, ", ".join(TRACK_LABELS))
 
     @staticmethod
     def _idle_pose(t: float, phase: float = 0.0) -> Rotation:
@@ -360,18 +359,12 @@ class Tracker(ReachyMiniApp):
         def get_state() -> dict:
             return state.snapshot()
 
-        @self.settings_app.get("/classes")
-        def get_classes() -> dict:
-            with state.lock:
-                return {"classes": list(state.classes)}
-
         @self.settings_app.post("/config")
         def set_config(config: Config) -> dict:
             with state.lock:
                 for field, value in config.model_dump(exclude_none=True).items():
                     setattr(state, field, value)
-                # A new class means the old lock is meaningless.
-                if config.label is not None or config.enabled is False:
+                if config.enabled is False:
                     state.goal = None
                     state.center = None
             return state.snapshot()

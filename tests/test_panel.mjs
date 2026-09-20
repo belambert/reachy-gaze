@@ -40,38 +40,34 @@ function makeEl(id) {
     };
 }
 
-function harness(source, { classesStatus = 200 } = {}) {
+function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
-        "label", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
+        "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
         "server-url", "apply-url", "badge-detector", "badge-lock", "badge-fps",
         "marker", "error",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
-        enabled: false, label: "person", conf: 0.4, pull: 20,
-        server_url: "http://old:8100", scan: true, locked: false,
-        detector_ok: true, error: "", fps: 0, center: null, classes_version: 0,
+        enabled: true, labels: ["person", "cat", "dog", "bird"], label: "",
+        conf: 0.4, pull: 20, server_url: "http://old:8100", scan: true,
+        locked: false, detector_ok: true, error: "", fps: 0, center: null,
         seen_ago: null,
     };
     const posts = [];
     const delays = { state: 0, config: 0 };
-    const status = { classes: classesStatus };
-    const vocabulary = ["person", "cat", "dog"];
+    const status = { state: stateStatus };
 
     const ok = (body) => ({ ok: true, status: 200, json: async () => body });
 
     async function fetchStub(path, options) {
-        if (path === "/classes") {
-            if (status.classes !== 200) {
-                // FastAPI's 404 body is valid JSON, which is what made this
-                // failure mode so quiet in the first place.
-                return {
-                    ok: false,
-                    status: status.classes,
-                    json: async () => ({ detail: "Not Found" }),
-                };
-            }
-            return ok({ classes: vocabulary.slice() });
+        if (path === "/state" && status.state !== 200) {
+            // FastAPI's 404 body is still valid JSON, which is what made this
+            // failure mode so quiet in the first place.
+            return {
+                ok: false,
+                status: status.state,
+                json: async () => ({ detail: "Not Found" }),
+            };
         }
         if (path === "/state") {
             // Snapshot before sleeping: that is what makes a slow reply stale.
@@ -98,77 +94,29 @@ function harness(source, { classesStatus = 200 } = {}) {
     };
     vm.createContext(ctx);
     vm.runInContext(fs.readFileSync(source, "utf8"), ctx);
-    return { els, app, posts, delays, status, vocabulary };
+    return { els, app, posts, delays, status };
 }
 
 const tests = {
-    // Bug: mousedown blurs the input, so a poll landing between blur and click
-    // reset .value, and the click handler then posted the stale URL back.
-    async "the class picker is populated from the app"() {
+    async "the panel names what the app is looking for"() {
         const h = harness(SOURCE);
         await sleep(30);
-        assert.deepEqual(
-            h.els.label.options.map((o) => o.value),
-            ["person", "cat", "dog"],
-            "the picker must list what /classes returned",
-        );
+        assert.equal(h.els.labels.textContent, "people, cats, dogs and birds");
     },
 
-    async "a missing /classes is reported, not swallowed"() {
-        const h = harness(SOURCE, { classesStatus: 404 });
+    async "a single label still reads properly"() {
+        const h = harness(SOURCE);
+        h.app.labels = ["cat"];
+        await sleep(400);
+        assert.equal(h.els.labels.textContent, "cats");
+    },
+
+    async "an unreachable app is reported, not swallowed"() {
+        const h = harness(SOURCE, { stateStatus: 404 });
         await sleep(60);
 
-        assert.match(h.els.error.textContent, /Could not load classes/);
         assert.match(h.els.error.textContent, /404/);
-    },
-
-    async "a picker that failed to load recovers on a later poll"() {
-        // The real failure: one fetch at startup lost a race and the dropdown
-        // stayed empty for as long as the page was open.
-        const h = harness(SOURCE, { classesStatus: 404 });
-        await sleep(60);
-        assert.equal(h.els.label.options.length, 0);
-
-        h.status.classes = 200;
-        await sleep(700);
-        assert.deepEqual(
-            h.els.label.options.map((o) => o.value),
-            ["person", "cat", "dog"],
-            "polling must retry the class list",
-        );
-        assert.equal(h.els.error.textContent, "", "the error must clear");
-    },
-
-    async "the picker follows a change of vocabulary"() {
-        const h = harness(SOURCE);
-        await sleep(60);
-        assert.equal(h.els.label.options.length, 3);
-
-        h.vocabulary.length = 0;
-        h.vocabulary.push("robot", "mug");
-        h.app.classes_version = 1;
-
-        await sleep(700);
-        assert.deepEqual(h.els.label.options.map((o) => o.value), ["robot", "mug"]);
-    },
-
-    async "an unchanged vocabulary is not refetched"() {
-        const h = harness(SOURCE);
-        await sleep(60);
-        const first = h.els.label.options;
-        await sleep(700);
-        assert.equal(h.els.label.options, first, "must not rebuild every poll");
-    },
-
-    async "the rest of the panel still works when /classes is missing"() {
-        const h = harness(SOURCE, { classesStatus: 404 });
-        await sleep(30);
-
-        // Listeners and polling must still have been wired up.
-        h.els.enabled.checked = true;
-        h.els.enabled.fire("change");
-        await sleep(60);
-        assert.equal(h.app.enabled, true, "controls must survive an empty picker");
+        assert.ok(h.els["badge-detector"].classList.contains("bad"));
     },
 
     async "the lock badge distinguishes a live target from a held aim"() {

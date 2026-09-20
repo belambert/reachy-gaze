@@ -15,15 +15,6 @@ let applied = 0;
 // poll overwriting what was typed a moment before it gets read back.
 const dirty = new Set();
 
-// Set if the class list could not be loaded. Kept apart from the app's own
-// error so a later successful poll cannot quietly paint over it.
-let loadError = "";
-
-// Which version of the class list the picker is showing. Polling drives the
-// reload, so a first attempt that lost a race with app startup heals itself.
-let renderedClasses = -1;
-let loadingClasses = false;
-
 async function request(path, options, keys = []) {
     const id = ++seq;
     let state;
@@ -57,36 +48,9 @@ const write = (config) =>
         Object.keys(config),
     );
 
-async function loadClasses(version) {
-    if (loadingClasses) return;
-    loadingClasses = true;
-    try {
-        const response = await fetch("/classes");
-        if (!response.ok) throw new Error(`/classes returned ${response.status}`);
-        const body = await response.json();
-        if (!Array.isArray(body.classes) || !body.classes.length) {
-            throw new Error("/classes sent no list");
-        }
-        const select = el("label");
-        const chosen = select.value;
-        select.replaceChildren(...body.classes.map((name) => new Option(name, name)));
-        if (body.classes.includes(chosen)) select.value = chosen;
-        renderedClasses = version;
-        loadError = "";
-    } catch (e) {
-        loadError = `Could not load classes: ${e.message}`;
-        el("error").textContent = loadError;
-    } finally {
-        loadingClasses = false;
-    }
-}
-
 function apply(state) {
-    if (state.classes_version !== renderedClasses) {
-        loadClasses(state.classes_version);
-    }
+    el("labels").textContent = list(state.labels);
 
-    if (!dirty.has("label")) el("label").value = state.label;
     if (!dirty.has("conf")) el("conf").value = state.conf;
     if (!dirty.has("pull")) el("pull").value = state.pull;
     if (!dirty.has("enabled")) el("enabled").checked = state.enabled;
@@ -124,7 +88,15 @@ function apply(state) {
         marker.style.display = "none";
     }
 
-    el("error").textContent = state.error || loadError || "";
+    el("error").textContent = state.error || "";
+}
+
+// "people, cats and dogs" reads better on the card than a bare CSV.
+function list(labels = []) {
+    const plural = labels.map((n) => (n === "person" ? "people" : `${n}s`));
+    return plural.length < 2
+        ? plural.join("")
+        : `${plural.slice(0, -1).join(", ")} and ${plural.at(-1)}`;
 }
 
 function badge(id, tone, text) {
@@ -141,13 +113,6 @@ function applyUrl() {
 }
 
 async function init() {
-    // The picker is filled by polling, not here: a one-shot fetch at startup is
-    // exactly what used to leave the dropdown empty when it lost a race.
-    el("label").addEventListener("change", (e) => {
-        dirty.add("label");
-        write({ label: e.target.value });
-    });
-
     // Writing on every drag event would flood the app; the label tracks live.
     for (const [id, digits] of [["conf", 2], ["pull", 0]]) {
         let timer;
