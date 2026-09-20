@@ -39,8 +39,13 @@ SMOOTH_TAU = 0.09  # follower time constant; larger is smoother and laggier
 MAX_HEAD_SPEED = 3.5  # rad/s ceiling on commanded head rotation
 MAX_HEAD_PULL = 10.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
 BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
-SCAN_DEGREES = 60.0  # half-width of the scan; the body carries the rest
-SCAN_HZ = 0.08  # scan rate; faster keeps the servos out of their judder range
+# The body's yaw joint stops at +/-160 degrees, so a true 360 is out of reach;
+# this leaves a little margin and covers everything but a wedge directly behind.
+SCAN_DEGREES = 150.0  # half-width of the yaw scan
+SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
+SCAN_PITCH_DEGREES = 18.0  # how far the scan looks up and down
+SCAN_PITCH_HZ = 0.11  # deliberately not a multiple of SCAN_HZ, so the two axes
+# trace a pattern over the room rather than retracing one line across it
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
@@ -155,7 +160,7 @@ class Tracker(ReachyMiniApp):
         perk = 0.0
         was_scanning = False
         scan_t0 = 0.0
-        scan_phase = 0.0
+        scan_phase = (0.0, 0.0)
         t0 = time.monotonic()
         last = t0
         next_tick = t0
@@ -328,21 +333,37 @@ class Tracker(ReachyMiniApp):
             logger.info("%s detects all of %s", detector.url, ", ".join(TRACK_LABELS))
 
     @staticmethod
-    def _scan_pose(t: float, phase: float = 0.0) -> Rotation:
-        """A slow yaw scan, so a lost target has a chance of wandering back in.
+    def _scan_pose(t: float, phase: tuple[float, float] = (0.0, 0.0)) -> Rotation:
+        """A slow look around and up and down, to find a target again.
 
         `t` is seconds since this scan began, not since the app started: the
-        phase is chosen per scan so it picks up from the head's current yaw.
+        phases are chosen per scan so it picks up from the head's current pose.
         """
-        angle = SCAN_DEGREES * math.sin(2 * math.pi * SCAN_HZ * t + phase)
-        return Rotation.from_euler("z", angle, degrees=True)
+        yaw_phase, pitch_phase = phase
+        yaw = SCAN_DEGREES * math.sin(2 * math.pi * SCAN_HZ * t + yaw_phase)
+        pitch = SCAN_PITCH_DEGREES * math.sin(
+            2 * math.pi * SCAN_PITCH_HZ * t + pitch_phase
+        )
+        # Intrinsic: pitch about the head's own axis after it has turned, not
+        # about a fixed one, which past 90 degrees of yaw is a different motion.
+        return Rotation.from_euler("ZY", [yaw, pitch], degrees=True)
 
     @staticmethod
-    def _scan_phase(rotation: Rotation) -> float:
-        """The scan phase whose starting yaw matches `rotation`."""
-        yaw = math.degrees(rotation.as_euler("zyx")[0])
+    def _scan_phase(rotation: Rotation) -> tuple[float, float]:
+        """The scan phases whose starting pose matches `rotation`."""
+        yaw, pitch, _ = rotation.as_euler("ZYX", degrees=True)
+        return (
+            Tracker._phase_at(yaw, SCAN_DEGREES),
+            Tracker._phase_at(pitch, SCAN_PITCH_DEGREES),
+        )
+
+    @staticmethod
+    def _phase_at(angle: float, amplitude: float) -> float:
+        """Where in a sine of `amplitude` the value `angle` sits, heading out."""
+        if amplitude <= 0.0:  # an axis turned off must not become a NaN pose
+            return 0.0
         # asin keeps the scan heading outward from here rather than reversing.
-        return math.asin(max(-1.0, min(1.0, yaw / SCAN_DEGREES)))
+        return math.asin(max(-1.0, min(1.0, angle / amplitude)))
 
     @staticmethod
     def _antennas(perk: float, t: float) -> np.ndarray:
