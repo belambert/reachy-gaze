@@ -1,6 +1,6 @@
 """Track a named COCO object with Reachy Mini's head.
 
-Detection runs off-board (see ``gaze_tracker.server``) because the Pi's CPU is
+Detection runs off-board (see ``tracker.server``) because the Pi's CPU is
 already busy with motor control. Two rates keep that from showing: the vision
 thread re-anchors the target a handful of times a second, while the control loop
 slews the head toward that anchor at 50 Hz.
@@ -19,8 +19,8 @@ from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
-from gaze_tracker.detector import COCO_CLASSES, DetectorUnavailable, RemoteDetector
-from gaze_tracker.tracking import (
+from tracker.detector import COCO_CLASSES, DetectorUnavailable, RemoteDetector
+from tracker.tracking import (
     CenterFilter,
     TargetSelector,
     norm_center,
@@ -89,7 +89,7 @@ class State:
             }
 
 
-class GazeTracker(ReachyMiniApp):
+class Tracker(ReachyMiniApp):
     """Point the head at whichever COCO class the control panel asks for."""
 
     custom_app_url: str | None = "http://0.0.0.0:8042"
@@ -99,7 +99,7 @@ class GazeTracker(ReachyMiniApp):
         """Serve the control panel, run the vision thread, and drive the head."""
         camera = reachy_mini.media.camera
         if camera is None or camera.K is None:
-            raise RuntimeError("Gaze tracking needs a calibrated camera.")
+            raise RuntimeError("Tracking needs a calibrated camera.")
 
         state = State()
         self._mount_api(state)
@@ -111,7 +111,7 @@ class GazeTracker(ReachyMiniApp):
             target=self._track,
             args=(reachy_mini, state, stop_event),
             daemon=True,
-            name="gaze-vision",
+            name="tracker-vision",
         )
         vision.start()
         try:
@@ -279,7 +279,7 @@ class GazeTracker(ReachyMiniApp):
 
 
 if __name__ == "__main__":
-    app = GazeTracker()
+    app = Tracker()
     try:
         app.wrapped_run()
     except KeyboardInterrupt:

@@ -14,5 +14,5 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv venv --python 3.13
       - run: uv pip install black isort
-      - run: uv run black --check gaze_tracker tests
-      - run: uv run isort --check-only gaze_tracker tests
+      - run: uv run black --check tracker tests
+      - run: uv run isort --check-only tracker tests

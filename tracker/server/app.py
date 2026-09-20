@@ -1,6 +1,6 @@
 """COCO detection service: run this on the machine with the GPU, not on the robot.
 
-uv run --extra server gaze-tracker-server --host 0.0.0.0
+uv run --extra server tracker-server --host 0.0.0.0
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="gaze-tracker detector")
+app = FastAPI(title="tracker detector")
 cli = typer.Typer(add_completion=False)
 
 _model: YOLO | None = None

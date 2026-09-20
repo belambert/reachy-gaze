@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.spatial.transform import Rotation
 
-from gaze_tracker.detector import Detection
+from tracker.detector import Detection
 
 
 def norm_center(det: Detection, width: int, height: int) -> tuple[float, float]:

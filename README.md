@@ -1,5 +1,5 @@
 ---
-title: Gaze Tracker
+title: Tracker
 emoji: 👁️
 colorFrom: red
 colorTo: blue
@@ -11,7 +11,7 @@ tags:
  - reachy_mini_python_app
 ---
 
-# Gaze Tracker
+# Tracker
 
 Reachy Mini follows a named object with its head. Pick a class in the control
 panel — `person`, `cat`, `dog`, or any of the other 80 COCO classes — and the
@@ -47,7 +47,7 @@ between two cats and a miss counter so it lets go once the real one leaves.
 ### 1. Start the detector, on your laptop
 
     uv sync --extra server
-    uv run gaze-tracker-server --host 0.0.0.0
+    uv run tracker-server --host 0.0.0.0
 
 It serves on port 8100 and picks up CUDA, MPS, or CPU automatically. The default
 model, `yolo11x.pt`, is the most accurate of the family and downloads 109 MB on
@@ -98,7 +98,7 @@ reorders the table. Re-run the benchmark before trusting them elsewhere.
 
 ## Tuning
 
-Constants live at the top of `gaze_tracker/main.py`:
+Constants live at the top of `tracker/main.py`:
 
 | Constant     | Default | Effect                                               |
 | ------------ | ------- | ---------------------------------------------------- |
@@ -107,7 +107,7 @@ Constants live at the top of `gaze_tracker/main.py`:
 | `LOST_AFTER` | 1.5     | Seconds without a detection before the head gives up |
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
-are constructor arguments on `TargetSelector` in `gaze_tracker/tracking.py`.
+are constructor arguments on `TargetSelector` in `tracker/tracking.py`.
 
 If the head settles slightly off-center and stops, that's `CenterFilter`'s dead
 zone doing its job: it trades a standing offset of up to 0.02 in normalized
@@ -115,7 +115,7 @@ frame coordinates for a head that doesn't dither on detector noise.
 
 ## Swapping the detector
 
-`gaze_tracker/detector.py` defines a `Detector` protocol — `classes()` and
+`tracker/detector.py` defines a `Detector` protocol — `classes()` and
 `detect(frame, labels, conf)`. `RemoteDetector` is the HTTP implementation. An
 on-device backend, or an open-vocabulary model like YOLOE that takes free-text
 prompts instead of a fixed 80 classes, only has to satisfy that protocol.
@@ -124,7 +124,7 @@ prompts instead of a fixed 80 classes, only has to satisfy that protocol.
 
     uv sync --extra dev
     uv run pytest
-    uv run black gaze_tracker tests && uv run isort gaze_tracker tests
+    uv run black tracker tests && uv run isort tracker tests
 
 The tests cover target selection, smoothing, the slew math, and the detector
 wire protocol against a stub server. None of them need a robot.

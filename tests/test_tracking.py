@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from gaze_tracker.detector import Detection
-from gaze_tracker.tracking import (
+from tracker.detector import Detection
+from tracker.tracking import (
     CenterFilter,
     TargetSelector,
     norm_center,

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from gaze_tracker.detector import COCO_CLASSES, DetectorUnavailable, RemoteDetector
+from tracker.detector import COCO_CLASSES, DetectorUnavailable, RemoteDetector
 
 # Filled in by each test with what the stub should return; captured requests land
 # in `seen` so tests can assert on what actually went over the wire.
