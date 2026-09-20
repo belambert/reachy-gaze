@@ -46,6 +46,9 @@ SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 SCAN_PITCH_DEGREES = 18.0  # how far the scan looks up and down
 SCAN_PITCH_HZ = 0.11  # deliberately not a multiple of SCAN_HZ, so the two axes
 # trace a pattern over the room rather than retracing one line across it
+DWELL = 20.0  # seconds watching one target before looking around for others
+SURVEY_FOR = 8.0  # seconds spent looking around before settling for what we had
+AVOID_DEGREES = 25.0  # a sighting this near the last target is that same target
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
@@ -89,6 +92,8 @@ class State:
         self.head_pose = np.eye(4)
         self.last_seen = 0.0
         self.detector_ok = False
+        # Looking around for someone new rather than watching the current one.
+        self.surveying = False
         self.error = ""
         self.fps = 0.0
         self.center: tuple[float, float] | None = None
@@ -110,6 +115,7 @@ class State:
                 "pull": self.pull,
                 "locked": locked,
                 "detector_ok": self.detector_ok,
+                "surveying": self.surveying,
                 "error": self.error,
                 "fps": round(self.fps, 1),
                 "center": self.center,
@@ -184,7 +190,12 @@ class Tracker(ReachyMiniApp):
                 goal = state.goal
                 # Not "seen just now": the aim is held for the whole of
                 # LOST_AFTER, so this stays true long after the last sighting.
-                aimed = goal is not None and now - state.last_seen < LOST_AFTER
+                # A survey drops it deliberately, to go and look elsewhere.
+                aimed = (
+                    goal is not None
+                    and now - state.last_seen < LOST_AFTER
+                    and not state.surveying
+                )
                 scanning = state.enabled and state.scan and not aimed
                 smoother.max_pull = state.pull  # tunable live from the panel
 
@@ -248,11 +259,15 @@ class Tracker(ReachyMiniApp):
         detector_url = ""
         period = 1.0 / DETECT_HZ
 
+        watching_since = 0.0
+        survey_until = 0.0
+        avoid: Rotation | None = None  # where the target we left was
+
         while not stop_event.is_set():
             started = time.monotonic()
             with state.lock:
                 enabled, conf, url = state.enabled, state.conf, state.server_url
-                head_pose = state.head_pose
+                scan, head_pose = state.scan, state.head_pose
 
             # Ahead of the enabled check: a new server should be vetted straight
             # away, not on the next tracking run.
@@ -266,6 +281,9 @@ class Tracker(ReachyMiniApp):
             if not enabled:
                 selector.reset()
                 smoother.reset()
+                survey_until, avoid = 0.0, None
+                with state.lock:
+                    state.surveying = False
                 stop_event.wait(0.2)
                 continue
 
@@ -286,25 +304,62 @@ class Tracker(ReachyMiniApp):
                 continue
 
             height, width = frame.shape[:2]
+            now = time.monotonic()
+
+            def aim_at(u: float, v: float) -> Rotation:
+                """Where the head must point to centre this pixel of the frame."""
+                return Rotation.from_matrix(
+                    look_at_image_pose(u, v, K, D, head_pose, T_head_cam)[:3, :3]
+                )
+
+            surveying = now < survey_until
+            if not surveying and avoid is not None:
+                # The survey found nobody new, so the one we left is fair game
+                # again — and gets a full dwell of its own.
+                avoid, watching_since = None, now
+            if surveying and avoid is not None:
+                dets = [
+                    det
+                    for det in dets
+                    if self._apart(aim_at(*det.center), avoid) > AVOID_DEGREES
+                ]
+
+            had_target = selector.has_target
             det = selector.select(dets, width, height)
             if det is None and not selector.has_target:
                 smoother.reset()
+            if det is not None and not had_target:
+                watching_since = now
+            if det is not None and surveying:
+                logger.info("Found a %s to look at instead", det.label)
+                survey_until, avoid, surveying = 0.0, None, False
+
+            # Long enough on this one; go and see who else is about. Where it
+            # was is remembered, so the scan does not just snap back to it.
+            if det is not None and scan and not surveying:
+                if now - watching_since > DWELL:
+                    logger.info(
+                        "Watched a %s for %.0fs; looking around", det.label, DWELL
+                    )
+                    avoid = aim_at(*det.center)
+                    survey_until, surveying = now + SURVEY_FOR, True
+                    selector.reset()
+                    smoother.reset()
 
             with state.lock:
                 state.detector_ok = True
                 state.error = ""
+                state.surveying = surveying
                 # Measured rate matters more than the cap; the panel shows it.
                 state.fps += 0.2 * (
                     1.0 / max(time.monotonic() - started, 1e-3) - state.fps
                 )
-                if det is not None:
+                if det is not None and not surveying:
                     center = smoother.update(norm_center(det, width, height))
                     u, v = pixel_center(center, width, height)
                     # Aim against the pose the frame was captured at, so a late
                     # detection still points where the target actually was.
-                    state.goal = Rotation.from_matrix(
-                        look_at_image_pose(u, v, K, D, head_pose, T_head_cam)[:3, :3]
-                    )
+                    state.goal = aim_at(u, v)
                     state.last_seen = time.monotonic()
                     state.center = center
                     state.label = det.label
@@ -312,6 +367,11 @@ class Tracker(ReachyMiniApp):
             elapsed = time.monotonic() - started
             if elapsed < period:
                 stop_event.wait(period - elapsed)
+
+    @staticmethod
+    def _apart(a: Rotation, b: Rotation) -> float:
+        """Degrees between two aim directions."""
+        return math.degrees((a * b.inv()).magnitude())
 
     @staticmethod
     def _check_vocabulary(detector: RemoteDetector) -> None:
