@@ -52,8 +52,9 @@ from there the head follows a box, whatever it is labelled. The panel reports
 which class the current target came back as.
 
 When detections stop, the head keeps its aim on the last known position for
-`LOST_AFTER` seconds before it starts scanning, so a subject that steps behind
-something is still being watched when it reappears. The panel distinguishes the
+`LOST_AFTER` seconds before it starts scanning the room — nearly all the way
+round, and up and down — so a subject that steps behind something is still
+being watched when it reappears. The panel distinguishes the
 two: **locked** while sightings are arriving, **holding** with the age of the
 last one while the head waits it out.
 
@@ -152,38 +153,72 @@ Constants live at the top of `tracker/main.py`:
 | `SCAN_DEGREES`   | 60.0    | Half-width of the scan                                    |
 | `SCAN_HZ`        | 0.08    | Scan rate                                                 |
 
-Each scan is phase-aligned to the head's current yaw, so it picks up from
-wherever the head was holding instead of returning to centre first. If the
-scan still looks unsteady on hardware, the commanded path is not the cause —
-simulated, it peaks at 0.26 rad/s³ of jerk against roughly 10 while tracking.
-Look instead at automatic body yaw, which a ±60° scan leans on heavily, or at
-the servos, which judder at the very low speeds around each turnaround.
+### The scan
 
-Both constants scale the motion together: peak scan speed is `2π · SCAN_HZ ·
-SCAN_DEGREES`, 30 °/s as set. Raising either keeps the servos moving faster and
-out of their judder range, at the cost of a brisker scan.
+Yaw and pitch each follow a sine at a different rate, so the head traces a
+pattern over the room rather than retracing one stripe across it — which is why
+`SCAN_PITCH_HZ` must not be a multiple of `SCAN_HZ`. One cycle takes 25 s and
+covers **296° of yaw and 36° of pitch**.
+
+It is not the full 360: the body's `yaw_body` joint stops at ±160°, and
+`SCAN_DEGREES` leaves margin off that. A wedge directly behind the robot cannot
+be seen at all, so a subject that leaves that way has to come back into view on
+its own.
+
+Each scan is phase-aligned to the head's current pose, on both axes, so it picks
+up from wherever the head was holding instead of snapping to centre first.
+
+### Why it never whips round
+
+A target can be acquired most of a turn away from where the head is pointing,
+and the head must not lunge at it. It can't, and the reason is `MAX_HEAD_PULL`
+rather than anything in the scan: once the spring term saturates, the follower
+settles at the speed where the capped pull balances damping,
+
+    terminal speed = MAX_HEAD_PULL * SMOOTH_TAU / 2
+
+which is **0.45 rad/s, about 26°/s** at the defaults. Simulated, the peak speed
+closing a 20°, 60°, 120° or 179° gap is the same 26°/s every time — distance
+changes how long it takes, never how fast it gets there. `MAX_HEAD_SPEED` is a
+backstop that never binds at these settings.
+
+The catch is that this ceiling is the **Responsiveness** slider's, not a fixed
+one. At 60 the terminal speed is 155°/s, and the robot will whip. If you raise
+it for snappier tracking, that is what you are trading away.
+
+For comparison, over a full scan cycle:
+
+| Motion                          | Peak speed | Peak acceleration |
+| ------------------------------- | ---------- | ----------------- |
+| Scan, 150° yaw and 18° pitch    | 26 °/s     | 171 °/s²          |
+| Tracking a 40° step (pull 10)   | 26 °/s     | 318 °/s²          |
+
+The scan is gentler than ordinary tracking, so if it looks unsteady on hardware
+the commanded path is not the cause. Look instead at automatic body yaw, which a
+±150° scan leans on for nearly all of its travel, or at the servos, which judder
+at the very low speeds around each turnaround.
 
 `MAX_HEAD_PULL` is only the starting value — the control panel's
 **Responsiveness** slider changes it live, so there is no need to edit code and
-reinstall to find a setting you like. It bounds how much commanded velocity can
-change in a single tick, which is the dial that trades smoothness against
-chasing power:
+reinstall to find a setting you like. It caps the follower's spring term, which is
+the dial that trades smoothness against chasing power — and, as above, it sets
+the speed ceiling for any large movement.
 
 Measured against a 40° step, with the time taken to settle within a degree of
-it:
+it, and the mean lag behind a subject crossing the view:
 
-| Responsiveness | Peak jerk | Peak speed | Settles in |
-| -------------- | --------- | ---------- | ---------- |
-| 4              | 2.2       | 10 °/s     | 3.80 s     |
-| 10 (default)   | 5.6       | 26 °/s     | 1.60 s     |
-| 20             | 11.1      | 52 °/s     | 0.92 s     |
-| 60             | 33.3      | 150 °/s    | 0.56 s     |
+| Responsiveness | Peak speed | Peak acceleration | Settles in | Mean lag |
+| -------------- | ---------- | ----------------- | ---------- | -------- |
+| 4              | 10 °/s     | 127 °/s²          | 3.80 s     | —        |
+| 10 (default)   | 26 °/s     | 318 °/s²          | 1.60 s     | 8.2°     |
+| 20             | 52 °/s     | 637 °/s²          | 0.92 s     | 4.2°     |
+| 60             | 150 °/s    | 1910 °/s²         | 0.56 s     | —        |
 
 Every setting still converges without overshoot; lower simply takes longer.
 Simulated against a brisk subject — 40° of yaw at 0.15 Hz, detected at 12 Hz —
-the follower cuts peak jerk about fourfold versus the plain first-order lag it
-replaced, 6.5 against 26.2. That costs tracking lag, and this is where the
-setting is felt: a mean of 8.2° behind the subject at 10, against 4.2° at 20.
+the follower cuts peak acceleration about fourfold versus the plain first-order
+lag it replaced. That costs tracking lag, and this is where the setting is
+felt: a mean of 8.2° behind the subject at 10, against 4.2° at 20.
 Raise it if the head visibly trails things you care about.
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
