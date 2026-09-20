@@ -263,12 +263,15 @@ class TestPosture:
         assert self.yaw(Tracker._idle_pose(0.0, phase)) == pytest.approx(held, abs=1e-6)
 
     def test_the_sweep_is_continuous_from_its_first_instant(self):
-        from tracker.main import Tracker
+        from tracker.main import CONTROL_HZ, SCAN_DEGREES, SCAN_HZ, Tracker
 
         start = Rotation.from_euler("z", 25.0, degrees=True)
         phase = Tracker._sweep_phase(start)
-        step = abs(self.yaw(Tracker._idle_pose(1 / 50, phase)) - 25.0)
-        assert step < 0.5, "no jump between holding and sweeping"
+        step = abs(self.yaw(Tracker._idle_pose(1 / CONTROL_HZ, phase)) - 25.0)
+        # One tick at the sweep's own top speed; more than that is a jump, and
+        # a fixed bound would only be measuring the amplitude.
+        fastest = 2 * math.pi * SCAN_HZ * SCAN_DEGREES / CONTROL_HZ
+        assert step <= fastest, "no jump between holding and sweeping"
 
     def test_a_sweep_heads_outward_not_back_to_centre(self):
         from tracker.main import Tracker
