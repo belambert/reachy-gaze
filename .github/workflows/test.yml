@@ -12,12 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv venv --python 3.13
-      # The robot SDK needs GStreamer/PyGObject on Linux, which needs cairo to
-      # build. The tested modules never import it, so install what they touch and
-      # keep uv from syncing the project on top of that.
-      - run: uv pip install numpy scipy pillow requests pytest
-      - run: uv run --no-project pytest tests -q
+      # The robot SDK pulls PyGObject, which builds against cairo and
+      # girepository. The runners ship neither, and the control loop's tests
+      # import the app itself, so there is no getting away without them.
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y libcairo2-dev libgirepository1.0-dev
+      - run: uv sync --extra dev
+      - run: uv run pytest tests -q
       # The control panel's state sync has races that only show up under
       # out-of-order responses; these drive it against a stubbed DOM.
       - run: node tests/test_panel.mjs

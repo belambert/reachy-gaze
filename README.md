@@ -207,4 +207,13 @@ prompts instead of a fixed 80 classes, only has to satisfy that protocol.
     uv run black tracker tests && uv run isort tracker tests
 
 The tests cover target selection, smoothing, the slew math, and the detector
-wire protocol against a stub server. None of them need a robot.
+wire protocol against a stub server. None of them need a robot. The panel's
+state sync has its own suite, which needs Node but no dependencies:
+
+    node tests/test_panel.mjs
+
+Two remotes, and they are not interchangeable: `origin` is the private GitHub
+repo, which runs CI, and `space` is the Hugging Face Space the robot installs
+from. A change is only on the robot once it has gone to `space`.
+
+    git push origin main && git push space main
