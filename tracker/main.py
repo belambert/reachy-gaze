@@ -98,6 +98,12 @@ class State:
         self.fps = 0.0
         self.center: tuple[float, float] | None = None
 
+    def forget_target(self) -> None:
+        """Drop the aim point, so the head keeps looking instead of returning."""
+        with self.lock:
+            self.goal = None
+            self.center = None
+
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
         with self.lock:
@@ -315,8 +321,12 @@ class Tracker(ReachyMiniApp):
             surveying = now < survey_until
             if not surveying and avoid is not None:
                 # The survey found nobody new, so the one we left is fair game
-                # again — and gets a full dwell of its own.
+                # again — and gets a full dwell of its own. Its aim point goes
+                # with it: still inside LOST_AFTER, it would otherwise drag the
+                # head straight back to where that target was eight seconds ago,
+                # which is a snap back rather than a sighting.
                 avoid, watching_since = None, now
+                state.forget_target()
             if surveying and avoid is not None:
                 dets = [
                     det
