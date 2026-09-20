@@ -56,7 +56,10 @@ for `SURVEY_FOR` seconds, to see who else is about. It remembers where that
 target was and ignores sightings within `AVOID_DEGREES` of it for the duration,
 so the scan doesn't simply snap straight back. Find someone else and it switches
 and the dwell starts again; find nobody and the old target becomes fair game,
-with a full dwell of its own. The panel says **looking around** while this is
+with a full dwell of its own — but only by being *seen* again. The aim point is
+dropped when a survey ends, because `SURVEY_FOR` is shorter than `LOST_AFTER`
+and a goal still inside the hold window would otherwise drag the head straight
+back to where that target was eight seconds ago. The panel says **looking around** while this is
 happening — the lock isn't lost, it's being ignored on purpose.
 
 When detections stop, the head keeps its aim on the last known position for
