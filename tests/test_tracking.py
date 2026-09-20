@@ -249,49 +249,96 @@ class TestPosture:
         assert Tracker._antennas(1.0, t)[0] == pytest.approx(np.deg2rad(20.0))
         assert Tracker._antennas(0.0, t)[0] == pytest.approx(0.0)
 
-    def yaw(self, rotation):
-        return np.degrees(rotation.as_euler("zyx")[0])
+    def angles(self, rotation):
+        """Yaw and pitch in degrees, intrinsic, the way the scan builds them."""
+        yaw, pitch, _ = rotation.as_euler("ZYX", degrees=True)
+        return yaw, pitch
 
-    @pytest.mark.parametrize("held", [0.0, 12.0, -20.0, 34.0])
+    def yaw(self, rotation):
+        return self.angles(rotation)[0]
+
+    @pytest.mark.parametrize(
+        "held", [(0.0, 0.0), (12.0, 5.0), (-20.0, -9.0), (140.0, 17.0)]
+    )
     def test_a_scan_begins_where_the_head_already_is(self, held):
         # Regression: the sine ran off a fixed epoch, so starting a scan threw
         # the head to centre and then out to an arbitrary phase.
         from tracker.main import Tracker
 
-        start = Rotation.from_euler("z", held, degrees=True)
+        start = Rotation.from_euler("ZY", held, degrees=True)
         phase = Tracker._scan_phase(start)
-        assert self.yaw(Tracker._scan_pose(0.0, phase)) == pytest.approx(held, abs=1e-6)
+        assert self.angles(Tracker._scan_pose(0.0, phase)) == pytest.approx(
+            held, abs=1e-6
+        )
 
     def test_the_scan_is_continuous_from_its_first_instant(self):
-        from tracker.main import CONTROL_HZ, SCAN_DEGREES, SCAN_HZ, Tracker
+        from tracker.main import (
+            CONTROL_HZ,
+            SCAN_DEGREES,
+            SCAN_HZ,
+            SCAN_PITCH_DEGREES,
+            SCAN_PITCH_HZ,
+            Tracker,
+        )
 
-        start = Rotation.from_euler("z", 25.0, degrees=True)
+        start = Rotation.from_euler("ZY", [25.0, 8.0], degrees=True)
         phase = Tracker._scan_phase(start)
-        step = abs(self.yaw(Tracker._scan_pose(1 / CONTROL_HZ, phase)) - 25.0)
-        # One tick at the scan's own top speed; more than that is a jump, and
-        # a fixed bound would only be measuring the amplitude.
-        fastest = 2 * math.pi * SCAN_HZ * SCAN_DEGREES / CONTROL_HZ
-        assert step <= fastest, "no jump between holding and scanning"
+        moved = Rotation.from_euler(
+            "ZY", [25.0, 8.0], degrees=True
+        ).inv() * Tracker._scan_pose(1 / CONTROL_HZ, phase)
+        # One tick at each axis's own top speed; more than that is a jump, and a
+        # fixed bound would only be measuring the amplitude.
+        fastest = (
+            2 * math.pi * SCAN_HZ * SCAN_DEGREES
+            + 2 * math.pi * SCAN_PITCH_HZ * SCAN_PITCH_DEGREES
+        ) / CONTROL_HZ
+        assert np.degrees(moved.magnitude()) <= fastest, "no jump into a scan"
 
     def test_a_scan_heads_outward_not_back_to_centre(self):
         from tracker.main import Tracker
 
-        phase = Tracker._scan_phase(Rotation.from_euler("z", 20.0, degrees=True))
+        phase = Tracker._scan_phase(Rotation.from_euler("Z", 20.0, degrees=True))
         assert self.yaw(Tracker._scan_pose(0.5, phase)) > 20.0
 
-    def test_a_yaw_beyond_the_scan_is_clamped_not_undefined(self):
-        from tracker.main import SCAN_DEGREES, Tracker
+    def test_an_angle_beyond_the_scan_is_clamped_not_undefined(self):
+        from tracker.main import SCAN_DEGREES, SCAN_PITCH_DEGREES, Tracker
 
-        phase = Tracker._scan_phase(Rotation.from_euler("z", 80.0, degrees=True))
-        assert math.isfinite(phase)
-        assert self.yaw(Tracker._scan_pose(0.0, phase)) == pytest.approx(SCAN_DEGREES)
+        beyond = Rotation.from_euler("ZY", [179.0, 40.0], degrees=True)
+        yaw_phase, pitch_phase = Tracker._scan_phase(beyond)
+        assert math.isfinite(yaw_phase) and math.isfinite(pitch_phase)
 
-    def test_the_scan_keeps_its_amplitude(self):
-        from tracker.main import SCAN_DEGREES, Tracker
+        yaw, pitch = self.angles(Tracker._scan_pose(0.0, (yaw_phase, pitch_phase)))
+        assert yaw == pytest.approx(SCAN_DEGREES)
+        assert pitch == pytest.approx(SCAN_PITCH_DEGREES)
 
-        reached = [self.yaw(Tracker._scan_pose(t / 10, 0.0)) for t in range(200)]
-        assert max(reached) == pytest.approx(SCAN_DEGREES, abs=0.5)
-        assert min(reached) == pytest.approx(-SCAN_DEGREES, abs=0.5)
+    def test_an_axis_of_zero_amplitude_is_not_a_nan(self):
+        # Setting SCAN_PITCH_DEGREES to 0 to turn pitch off must not divide by it
+        # and hand the control loop a NaN pose.
+        from tracker.main import Tracker
+
+        assert Tracker._phase_at(12.0, 0.0) == 0.0
+
+    def test_the_scan_looks_all_the_way_round_and_up_and_down(self):
+        from tracker.main import SCAN_DEGREES, SCAN_HZ, SCAN_PITCH_DEGREES, Tracker
+
+        seen = [
+            self.angles(Tracker._scan_pose(t / 20, (0.0, 0.0)))
+            for t in range(int(20 / SCAN_HZ))
+        ]
+        yaws, pitches = [y for y, _ in seen], [p for _, p in seen]
+
+        assert max(yaws) == pytest.approx(SCAN_DEGREES, abs=0.5)
+        assert min(yaws) == pytest.approx(-SCAN_DEGREES, abs=0.5)
+        assert max(pitches) == pytest.approx(SCAN_PITCH_DEGREES, abs=0.5)
+        assert min(pitches) == pytest.approx(-SCAN_PITCH_DEGREES, abs=0.5)
+
+    def test_the_two_axes_do_not_retrace_one_line(self):
+        # Commensurate rates would close the figure and sweep the same stripe
+        # forever, leaving most of the room unscanned.
+        from tracker.main import SCAN_HZ, SCAN_PITCH_HZ
+
+        ratio = SCAN_PITCH_HZ / SCAN_HZ
+        assert abs(ratio - round(ratio)) > 0.1, "pitch must not be a multiple of yaw"
 
 
 class TestPullTuning:
@@ -333,3 +380,48 @@ class TestPullTuning:
                 for _ in range(400)
             ]
             assert max(angles) <= 30.0 + 1e-6, f"pull={pull} overshot"
+
+
+class TestNoWhip:
+    """A target spotted far off must be approached, never lunged at.
+
+    The scan reaches almost all the way around, so a target can be acquired
+    most of a turn away from where the head is pointing.
+    """
+
+    def peak_speed(self, offset, pull=None, seconds=30):
+        """Fastest the head moves, in deg/s, closing an `offset` degree gap."""
+        from tracker.main import MAX_HEAD_PULL, MAX_HEAD_SPEED, SMOOTH_TAU
+
+        smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, pull or MAX_HEAD_PULL)
+        goal = Rotation.from_euler("Z", offset, degrees=True)
+        speeds, previous = [], smoother.rotation
+        for _ in range(int(seconds * 50)):
+            smoother.step(goal, 1 / 50)
+            speeds.append(
+                np.degrees(float((smoother.rotation * previous.inv()).magnitude())) * 50
+            )
+            previous = smoother.rotation
+        return max(speeds), float((goal * smoother.rotation.inv()).magnitude())
+
+    def terminal(self, pull=None):
+        """Speed at which the capped pull balances damping: the real ceiling."""
+        from tracker.main import MAX_HEAD_PULL, SMOOTH_TAU
+
+        return np.degrees((pull or MAX_HEAD_PULL) * SMOOTH_TAU / 2)
+
+    @pytest.mark.parametrize("offset", [20, 60, 120, 179])
+    def test_speed_does_not_grow_with_distance(self, offset):
+        speed, _ = self.peak_speed(offset)
+        assert speed <= self.terminal() * 1.05, "a distant target must not whip"
+
+    def test_a_distant_target_is_still_reached(self):
+        # Gentle must not mean stuck.
+        _, remaining = self.peak_speed(179)
+        assert np.degrees(remaining) < 1.0
+
+    def test_raising_responsiveness_gives_up_the_guarantee(self):
+        # Worth knowing: the ceiling is the slider's, not a fixed one.
+        gentle, _ = self.peak_speed(179, pull=10)
+        brisk, _ = self.peak_speed(179, pull=60)
+        assert brisk > 4 * gentle
