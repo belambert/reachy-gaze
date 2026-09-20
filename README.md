@@ -59,8 +59,12 @@ Note the machine's LAN address — the robot needs to reach it.
 ### 2. Start the app, on the robot
 
 Install it as a Reachy Mini app, then open the control panel at
-<http://localhost:8042>. Set **Detector** to `http://<your-laptop-ip>:8100`,
-choose a class, and tick **Tracking enabled**.
+<http://localhost:8042>. Check that **Detector** points at the machine running
+the server, choose a class, and tick **Tracking enabled**.
+
+The field is prefilled from `DEFAULT_SERVER_URL` in `tracker/main.py`. Set
+`TRACKER_SERVER_URL` to change it without editing code — worth doing if the
+server's address comes from DHCP and moves.
 
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.

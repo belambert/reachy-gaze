@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
 
@@ -35,6 +36,10 @@ SLEW_TAU = 0.15  # seconds to close ~63% of the angular error
 LOST_AFTER = 1.5  # seconds without a detection before giving up the lock
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
+# Prefilled in the control panel. Override without editing code by setting
+# TRACKER_SERVER_URL; a DHCP lease will eventually make this one wrong.
+DEFAULT_SERVER_URL = os.environ.get("TRACKER_SERVER_URL", "http://10.0.0.206:8100")
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +63,7 @@ class State:
         self.enabled = False
         self.label = "person"
         self.conf = 0.4
-        self.server_url = "http://192.168.1.10:8100"
+        self.server_url = DEFAULT_SERVER_URL
         self.scan = True
 
         self.goal: Rotation | None = None
