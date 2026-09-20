@@ -51,6 +51,7 @@ function harness(source, { classesStatus = 200 } = {}) {
         enabled: false, label: "person", conf: 0.4, pull: 20,
         server_url: "http://old:8100", scan: true, locked: false,
         detector_ok: true, error: "", fps: 0, center: null, classes_version: 0,
+        seen_ago: null,
     };
     const posts = [];
     const delays = { state: 0, config: 0 };
@@ -168,6 +169,32 @@ const tests = {
         h.els.enabled.fire("change");
         await sleep(60);
         assert.equal(h.app.enabled, true, "controls must survive an empty picker");
+    },
+
+    async "the lock badge distinguishes a live target from a held aim"() {
+        const h = harness(SOURCE);
+        await sleep(60);
+        const lock = h.els["badge-lock"];
+
+        assert.equal(lock.textContent, "searching");
+        assert.ok(lock.classList.contains("bad"));
+
+        Object.assign(h.app, { locked: true, seen_ago: 0.2, label: "cat" });
+        await sleep(400);
+        assert.equal(lock.textContent, "locked: cat");
+        assert.ok(lock.classList.contains("ok"));
+
+        // The head still aims there, but the cat was last seen 6s ago: saying
+        // "locked" here is what would mislead.
+        Object.assign(h.app, { locked: true, seen_ago: 6.0 });
+        await sleep(400);
+        assert.equal(lock.textContent, "holding: cat (6s)");
+        assert.ok(lock.classList.contains("warn"));
+        assert.ok(!lock.classList.contains("ok"), "tones must be exclusive");
+
+        Object.assign(h.app, { locked: false, seen_ago: null });
+        await sleep(400);
+        assert.equal(lock.textContent, "searching");
     },
 
     async "a stale poll must not steal what was typed"() {

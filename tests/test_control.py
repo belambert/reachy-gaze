@@ -70,3 +70,43 @@ def test_commands_are_finite_and_well_formed(tracker):
         assert np.isfinite(head).all()
         assert len(antennas) == 2
         assert np.isfinite(antennas).all()
+
+
+class TestHoldWindow:
+    """The head keeps its aim for LOST_AFTER, and the panel must say so honestly."""
+
+    def state_at(self, seconds_ago):
+        import time
+
+        from scipy.spatial.transform import Rotation
+
+        from tracker.main import State
+
+        state = State()
+        state.goal = Rotation.identity()
+        state.last_seen = time.monotonic() - seconds_ago
+        return state.snapshot()
+
+    def test_no_target_is_not_locked(self):
+        from tracker.main import State
+
+        snap = State().snapshot()
+        assert snap["locked"] is False
+        assert snap["seen_ago"] is None
+
+    def test_a_fresh_sighting_is_locked(self):
+        snap = self.state_at(0.1)
+        assert snap["locked"] is True
+        assert snap["seen_ago"] == pytest.approx(0.1, abs=0.2)
+
+    @pytest.mark.parametrize("ago", [2.0, 5.0, 9.0])
+    def test_the_aim_is_held_well_past_the_last_sighting(self, ago):
+        from tracker.main import LOST_AFTER
+
+        assert LOST_AFTER >= 10.0, "the hold window is what this guards"
+        assert self.state_at(ago)["locked"] is True
+
+    def test_the_lock_is_released_past_the_window(self):
+        snap = self.state_at(11.0)
+        assert snap["locked"] is False
+        assert snap["seen_ago"] is None, "no point reporting staleness once given up"
