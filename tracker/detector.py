@@ -96,13 +96,21 @@ class RemoteDetector:
         self._session = requests.Session()
 
     def classes(self) -> list[str]:
-        """Ask the service for its vocabulary, falling back to bundled COCO names."""
+        """Ask the service for its vocabulary.
+
+        Raises:
+            DetectorUnavailable: If the service cannot be reached or answers
+                with something other than a class list.
+
+        """
         try:
             resp = self._session.get(f"{self.url}/classes", timeout=self.timeout)
             resp.raise_for_status()
             return list(resp.json()["classes"])
-        except (requests.RequestException, KeyError, ValueError):
-            return list(COCO_CLASSES)
+        except requests.RequestException as e:
+            raise DetectorUnavailable(f"{self.url}: {e}") from e
+        except (KeyError, ValueError) as e:
+            raise DetectorUnavailable(f"{self.url}: bad class list") from e
 
     def detect(
         self, frame: npt.NDArray[np.uint8], labels: list[str], conf: float

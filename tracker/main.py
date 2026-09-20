@@ -73,6 +73,8 @@ class State:
         self.error = ""
         self.fps = 0.0
         self.center: tuple[float, float] | None = None
+        # Seeded so the picker works before any server has been reached.
+        self.classes = list(COCO_CLASSES)
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -188,17 +190,20 @@ class Tracker(ReachyMiniApp):
                 )
                 head_pose = state.head_pose
 
-            if not enabled or not label:
-                selector.reset()
-                smoother.reset()
-                stop_event.wait(0.2)
-                continue
-
+            # Ahead of the enabled check: pointing at a new server should
+            # refresh the picker straight away, not on the next tracking run.
             if detector is None or url != detector_url:
                 detector = RemoteDetector(url)
                 detector_url = url
                 selector.reset()
                 smoother.reset()
+                self._refresh_classes(detector, state)
+
+            if not enabled or not label:
+                selector.reset()
+                smoother.reset()
+                stop_event.wait(0.2)
+                continue
 
             frame = mini.media.get_frame()
             if frame is None:
@@ -244,6 +249,18 @@ class Tracker(ReachyMiniApp):
                 stop_event.wait(period - elapsed)
 
     @staticmethod
+    def _refresh_classes(detector: RemoteDetector, state: State) -> None:
+        """Adopt the server's vocabulary, keeping the last known one on failure."""
+        try:
+            classes = detector.classes()
+        except DetectorUnavailable as e:
+            logger.warning("Could not fetch class list: %s", e)
+            return
+        with state.lock:
+            state.classes = classes
+        logger.info("Fetched %d classes from %s", len(classes), detector.url)
+
+    @staticmethod
     def _idle_pose(t: float) -> Rotation:
         """A slow yaw sweep, so a lost target has a chance of wandering back in."""
         return Rotation.from_euler(
@@ -269,7 +286,8 @@ class Tracker(ReachyMiniApp):
 
         @self.settings_app.get("/classes")
         def get_classes() -> dict:
-            return {"classes": COCO_CLASSES}
+            with state.lock:
+                return {"classes": list(state.classes)}
 
         @self.settings_app.post("/config")
         def set_config(config: Config) -> dict:
