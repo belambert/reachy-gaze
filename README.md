@@ -149,16 +149,19 @@ Constants live at the top of `tracker/main.py`:
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
 | `STALE_AFTER`    | 1.0     | Seconds before the panel calls a lock held rather than live |
-| `SCAN_DEGREES`   | 35.0    | Half-width of the search sweep                            |
+| `SCAN_DEGREES`   | 60.0    | Half-width of the search sweep                            |
 | `SCAN_HZ`        | 0.08    | Sweep rate                                                |
 
 Each sweep is phase-aligned to the head's current yaw, so it picks up from
 wherever the head was holding instead of returning to centre first. If the
 sweep still looks unsteady on hardware, the commanded path is not the cause —
-simulated, it peaks at 0.15 rad/s³ of jerk against roughly 10 while tracking.
-Look instead at automatic body yaw engaging near the extremes, or at the
-servos, which judder at the very low speeds around each turnaround. Raising
-`SCAN_HZ` keeps them moving faster and out of that range.
+simulated, it peaks at 0.26 rad/s³ of jerk against roughly 10 while tracking.
+Look instead at automatic body yaw, which a ±60° sweep leans on heavily, or at
+the servos, which judder at the very low speeds around each turnaround.
+
+Both constants scale the motion together: peak sweep speed is `2π · SCAN_HZ ·
+SCAN_DEGREES`, 30 °/s as set. Raising either keeps the servos moving faster and
+out of their judder range, at the cost of a brisker sweep.
 
 `MAX_HEAD_PULL` is only the starting value — the control panel's
 **Responsiveness** slider changes it live, so there is no need to edit code and
