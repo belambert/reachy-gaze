@@ -73,10 +73,14 @@ def pick_device() -> str:
 
 
 @app.get("/classes")
-def classes() -> dict:
+def classes(request: Request) -> dict:
     """The model's full vocabulary."""
     assert _model is not None
-    return {"classes": list(_model.names.values())}
+    names = list(_model.names.values())
+    # Asked for once per server change, so a line each is informative not noisy.
+    who = request.client.host if request.client else "unknown"
+    logger.info("served class list (%d classes) to %s", len(names), who)
+    return {"classes": names}
 
 
 @app.get("/health")
