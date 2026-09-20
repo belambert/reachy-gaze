@@ -177,11 +177,13 @@ class Tracker(ReachyMiniApp):
                 if pose is not None:
                     state.head_pose = pose
                 goal = state.goal
-                fresh = goal is not None and now - state.last_seen < LOST_AFTER
-                scanning = state.enabled and state.scan and not fresh
+                # Not "seen just now": the aim is held for the whole of
+                # LOST_AFTER, so this stays true long after the last sighting.
+                aimed = goal is not None and now - state.last_seen < LOST_AFTER
+                scanning = state.enabled and state.scan and not aimed
                 smoother.max_pull = state.pull  # tunable live from the panel
 
-            lock_level += (float(fresh) - lock_level) * (
+            lock_level += (float(aimed) - lock_level) * (
                 1.0 - math.exp(-dt / BLEND_TAU)
             )
 
@@ -193,7 +195,7 @@ class Tracker(ReachyMiniApp):
                 sweep_phase = self._sweep_phase(smoother.rotation)
             sweeping = scanning
 
-            if not fresh:
+            if not aimed:
                 goal = (
                     self._idle_pose(now - sweep_t0, sweep_phase)
                     if scanning
