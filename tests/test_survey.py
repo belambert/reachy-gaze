@@ -144,8 +144,13 @@ class TestFruitlessSurvey:
 
 class TestFindingSomeoneElse:
     def test_a_different_subject_ends_the_survey_early(self, run):
+        turned_away = []
+
         def and_a_person(_):
-            here = [] if Script.state.surveying else [box(W / 2, H / 2)]
+            # Once the head has turned away the cat stays out of frame, so the
+            # person is genuinely the only thing left to look at.
+            turned_away.append(Script.state.surveying)
+            here = [] if any(turned_away) else [box(W / 2, H / 2)]
             return here + [box(elsewhere(0), H / 2, size=80, label="person")]
 
         state, _ = run(and_a_person)

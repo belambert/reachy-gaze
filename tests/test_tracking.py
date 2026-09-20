@@ -425,3 +425,76 @@ class TestNoWhip:
         gentle, _ = self.peak_speed(179, pull=10)
         brisk, _ = self.peak_speed(179, pull=60)
         assert brisk > 4 * gentle
+
+
+class TestPriority:
+    """Earlier in TRACK_LABELS wins: a cat in view outranks a person in view."""
+
+    PRIORITY = ["cat", "dog", "person"]
+
+    def selector(self, **kw):
+        return TargetSelector(self.PRIORITY, **kw)
+
+    def test_acquires_the_preferred_class_over_a_bigger_one(self):
+        cat = box(200, 240, size=80, label="cat")
+        person = box(450, 240, size=300, label="person")
+        assert self.selector().select([person, cat], W, H) is cat
+
+    def test_falls_back_when_the_preferred_class_is_absent(self):
+        person = box(450, 240, size=200, label="person")
+        assert self.selector().select([person], W, H) is person
+
+    def test_leaves_a_person_for_a_cat(self):
+        sel = self.selector(upgrade_after=3)
+        person = box(450, 240, size=200, label="person")
+        sel.select([person], W, H)
+        assert sel.label == "person"
+
+        cat = box(200, 240, size=80, label="cat")
+        for _ in range(3):
+            sel.select([person, cat], W, H)
+        assert sel.label == "cat", "a cat in view must take the lock"
+
+    def test_a_flickering_cat_does_not_bounce_the_lock(self):
+        # One frame of a marginal detection must not throw the head across the
+        # room and back again.
+        sel = self.selector(upgrade_after=3)
+        person = box(450, 240, size=200, label="person")
+        sel.select([person], W, H)
+
+        cat = box(200, 240, size=80, label="cat")
+        for _ in range(10):
+            sel.select([person, cat], W, H)
+            sel.select([person], W, H)  # the cat drops out again
+        assert sel.label == "person", "an intermittent cat must not win"
+
+    def test_it_does_not_leave_a_cat_for_a_person(self):
+        sel = self.selector()
+        cat = box(320, 240, size=100, label="cat")
+        sel.select([cat], W, H)
+
+        person = box(340, 240, size=400, label="person")
+        for _ in range(10):
+            sel.select([person, cat], W, H)
+        assert sel.label == "cat", "the preference does not run backwards"
+
+    def test_an_unlisted_class_ranks_last(self):
+        sel = self.selector()
+        assert sel._rank("bird") > sel._rank("person")
+
+    def test_a_preferred_speck_does_not_steal_the_lock(self):
+        # The area gate still applies to an upgrade, or a stray pixel of cat
+        # would take the head off a person standing right there.
+        sel = self.selector(upgrade_after=1)
+        person = box(450, 240, size=200, label="person")
+        sel.select([person], W, H)
+
+        for _ in range(5):
+            sel.select([person, box(100, 100, size=4, label="cat")], W, H)
+        assert sel.label == "person"
+
+    def test_reset_forgets_the_class_too(self):
+        sel = self.selector()
+        sel.select([box(320, 240, size=100, label="cat")], W, H)
+        sel.reset()
+        assert sel.label is None
