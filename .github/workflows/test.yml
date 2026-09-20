@@ -1,0 +1,19 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python 3.13
+      # The robot SDK needs GStreamer/PyGObject on Linux; the tested modules
+      # don't import it, so install only what the tests actually touch.
+      - run: uv pip install numpy scipy pillow requests pytest
+      - run: uv run pytest tests -q
