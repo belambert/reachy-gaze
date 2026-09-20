@@ -81,6 +81,9 @@ class State:
         self.center: tuple[float, float] | None = None
         # Seeded so the picker works before any server has been reached.
         self.classes = list(COCO_CLASSES)
+        # Bumped whenever the list actually changes, so the panel knows to
+        # re-read it rather than polling 80 strings several times a second.
+        self.classes_version = 0
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -100,6 +103,7 @@ class State:
                 "error": self.error,
                 "fps": round(self.fps, 1),
                 "center": self.center,
+                "classes_version": self.classes_version,
             }
 
 
@@ -303,7 +307,9 @@ class Tracker(ReachyMiniApp):
             logger.warning("Could not fetch class list: %s", e)
             return
         with state.lock:
-            state.classes = classes
+            if classes != state.classes:
+                state.classes = classes
+                state.classes_version += 1
         logger.info("Fetched %d classes from %s", len(classes), detector.url)
 
     @staticmethod

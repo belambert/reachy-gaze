@@ -15,6 +15,11 @@ const dirty = new Set();
 // error so a later successful poll cannot quietly paint over it.
 let loadError = "";
 
+// Which version of the class list the picker is showing. Polling drives the
+// reload, so a first attempt that lost a race with app startup heals itself.
+let renderedClasses = -1;
+let loadingClasses = false;
+
 async function request(path, options, keys = []) {
     const id = ++seq;
     let state;
@@ -48,7 +53,35 @@ const write = (config) =>
         Object.keys(config),
     );
 
+async function loadClasses(version) {
+    if (loadingClasses) return;
+    loadingClasses = true;
+    try {
+        const response = await fetch("/classes");
+        if (!response.ok) throw new Error(`/classes returned ${response.status}`);
+        const body = await response.json();
+        if (!Array.isArray(body.classes) || !body.classes.length) {
+            throw new Error("/classes sent no list");
+        }
+        const select = el("label");
+        const chosen = select.value;
+        select.replaceChildren(...body.classes.map((name) => new Option(name, name)));
+        if (body.classes.includes(chosen)) select.value = chosen;
+        renderedClasses = version;
+        loadError = "";
+    } catch (e) {
+        loadError = `Could not load classes: ${e.message}`;
+        el("error").textContent = loadError;
+    } finally {
+        loadingClasses = false;
+    }
+}
+
 function apply(state) {
+    if (state.classes_version !== renderedClasses) {
+        loadClasses(state.classes_version);
+    }
+
     if (!dirty.has("label")) el("label").value = state.label;
     if (!dirty.has("conf")) el("conf").value = state.conf;
     if (!dirty.has("pull")) el("pull").value = state.pull;
