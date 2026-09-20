@@ -111,12 +111,15 @@ class Tracker(ReachyMiniApp):
 
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
         """Serve the control panel, run the vision thread, and drive the head."""
-        camera = reachy_mini.media.camera
-        if camera is None or camera.K is None:
-            raise RuntimeError("Tracking needs a calibrated camera.")
-
+        # Mount before anything that can fail: a panel whose endpoints 404 looks
+        # to the browser like an app with no classes and no state at all.
         state = State()
         self._mount_api(state)
+
+        camera = reachy_mini.media.camera
+        if camera is None or camera.K is None:
+            state.error = "Tracking needs a calibrated camera."
+            raise RuntimeError(state.error)
 
         # Let the body carry the head past its own yaw limit.
         reachy_mini.set_automatic_body_yaw(True)
@@ -137,6 +140,7 @@ class Tracker(ReachyMiniApp):
         self, mini: ReachyMini, state: State, stop_event: threading.Event
     ) -> None:
         """Follow the current goal, keeping commanded velocity continuous."""
+        logger.info("Control loop running at %.0f Hz", CONTROL_HZ)
         period = 1.0 / CONTROL_HZ
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
         lock_level = 0.0
@@ -150,9 +154,16 @@ class Tracker(ReachyMiniApp):
             last = now
 
             # Cheap: the SDK's receive thread keeps this up to date for us.
-            pose = mini.get_current_head_pose()
+            # It asserts until the daemon has published a first pose, though,
+            # which at startup would otherwise take the whole app down.
+            try:
+                pose = mini.get_current_head_pose()
+            except AssertionError:
+                pose = None
+
             with state.lock:
-                state.head_pose = pose
+                if pose is not None:
+                    state.head_pose = pose
                 goal = state.goal
                 fresh = goal is not None and now - state.last_seen < LOST_AFTER
                 scanning = state.enabled and state.scan and not fresh
@@ -191,6 +202,18 @@ class Tracker(ReachyMiniApp):
         self, mini: ReachyMini, state: State, stop_event: threading.Event
     ) -> None:
         """Detect the requested class and turn each hit into an absolute head pose."""
+        try:
+            self._track_forever(mini, state, stop_event)
+        except Exception as e:
+            logger.exception("Vision thread died")
+            with state.lock:
+                state.error = f"Vision thread died: {e}"
+            raise
+
+    def _track_forever(
+        self, mini: ReachyMini, state: State, stop_event: threading.Event
+    ) -> None:
+        """Body of the vision thread."""
         camera = mini.media.camera
         assert camera is not None
         K, D = camera.K, camera.D
