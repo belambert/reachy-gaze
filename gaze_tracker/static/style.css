@@ -72,6 +72,11 @@ input[type="text"] {
     font: inherit;
 }
 
+/* Typed but not yet applied, so a poll must not overwrite it. */
+input[type="text"].unsaved {
+    border-color: var(--accent);
+}
+
 input[type="range"] {
     flex: 1;
     accent-color: var(--accent);

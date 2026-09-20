@@ -1,32 +1,54 @@
 const el = (id) => document.getElementById(id);
 
-// Set while applying a server snapshot, so echoed changes don't post back.
-let syncing = false;
+// Responses can arrive out of order — a poll issued before a write can resolve
+// after it — so every request takes a sequence number and an older response is
+// never allowed to paint over a newer one.
+let seq = 0;
+let applied = 0;
 
-async function post(config) {
-    if (syncing) return;
+// Fields edited locally but not yet acknowledged by the app. Focus is the wrong
+// test here: clicking Apply blurs the input first, which would expose it to a
+// poll overwriting what was typed a moment before it gets read back.
+const dirty = new Set();
+
+async function request(path, options, keys = []) {
+    const id = ++seq;
+    let state;
     try {
-        apply(await (await fetch("/config", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(config),
-        })).json());
+        state = await (await fetch(path, options)).json();
     } catch (e) {
-        el("error").textContent = "Could not reach the app.";
+        badge("badge-detector", false, "app unreachable");
+        return;
+    }
+    keys.forEach((key) => dirty.delete(key));
+    if (id > applied) {
+        applied = id;
+        apply(state);
     }
 }
 
-function apply(state) {
-    syncing = true;
+const poll = () => request("/state");
 
-    el("label").value = state.label;
-    el("conf").value = state.conf;
-    el("conf-value").textContent = Number(state.conf).toFixed(2);
-    el("enabled").checked = state.enabled;
-    el("scan").checked = state.scan;
-    if (document.activeElement !== el("server-url")) {
-        el("server-url").value = state.server_url;
-    }
+const write = (config) =>
+    request(
+        "/config",
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(config),
+        },
+        Object.keys(config),
+    );
+
+function apply(state) {
+    if (!dirty.has("label")) el("label").value = state.label;
+    if (!dirty.has("conf")) el("conf").value = state.conf;
+    if (!dirty.has("enabled")) el("enabled").checked = state.enabled;
+    if (!dirty.has("scan")) el("scan").checked = state.scan;
+    if (!dirty.has("server_url")) el("server-url").value = state.server_url;
+
+    el("conf-value").textContent = Number(el("conf").value).toFixed(2);
+    el("server-url").classList.toggle("unsaved", dirty.has("server_url"));
 
     badge("badge-detector", state.detector_ok, state.detector_ok ? "detector up" : "detector down");
     badge("badge-lock", state.locked, state.locked ? `locked: ${state.label}` : "searching");
@@ -35,14 +57,13 @@ function apply(state) {
     const marker = el("marker");
     if (state.center && state.locked) {
         marker.style.display = "block";
-        marker.style.left = `${(state.center[0] + 1) / 2 * 100}%`;
-        marker.style.top = `${(state.center[1] + 1) / 2 * 100}%`;
+        marker.style.left = `${((state.center[0] + 1) / 2) * 100}%`;
+        marker.style.top = `${((state.center[1] + 1) / 2) * 100}%`;
     } else {
         marker.style.display = "none";
     }
 
     el("error").textContent = state.error || "";
-    syncing = false;
 }
 
 function badge(id, ok, text) {
@@ -52,26 +73,50 @@ function badge(id, ok, text) {
     node.classList.toggle("bad", !ok);
 }
 
-async function poll() {
-    try {
-        apply(await (await fetch("/state")).json());
-    } catch (e) {
-        badge("badge-detector", false, "app unreachable");
-    }
+function applyUrl() {
+    const url = el("server-url").value.trim();
+    if (url) write({ server_url: url });
 }
 
 async function init() {
-    const { classes } = await (await fetch("/classes")).json();
+    let classes = [];
+    try {
+        ({ classes } = await (await fetch("/classes")).json());
+    } catch (e) {
+        // Losing the picker must not also cost us the status readout.
+        badge("badge-detector", false, "app unreachable");
+    }
     el("label").append(...classes.map((name) => new Option(name, name)));
 
-    el("label").addEventListener("change", (e) => post({ label: e.target.value }));
-    el("conf").addEventListener("input", (e) => {
-        el("conf-value").textContent = Number(e.target.value).toFixed(2);
-        post({ conf: Number(e.target.value) });
+    el("label").addEventListener("change", (e) => {
+        dirty.add("label");
+        write({ label: e.target.value });
     });
-    el("enabled").addEventListener("change", (e) => post({ enabled: e.target.checked }));
-    el("scan").addEventListener("change", (e) => post({ scan: e.target.checked }));
-    el("apply-url").addEventListener("click", () => post({ server_url: el("server-url").value }));
+
+    // Writing on every drag event would flood the app; the label tracks live.
+    let confTimer;
+    el("conf").addEventListener("input", (e) => {
+        dirty.add("conf");
+        el("conf-value").textContent = Number(e.target.value).toFixed(2);
+        clearTimeout(confTimer);
+        confTimer = setTimeout(() => write({ conf: Number(e.target.value) }), 150);
+    });
+
+    for (const id of ["enabled", "scan"]) {
+        el(id).addEventListener("change", (e) => {
+            dirty.add(id);
+            write({ [id]: e.target.checked });
+        });
+    }
+
+    el("server-url").addEventListener("input", () => {
+        dirty.add("server_url");
+        el("server-url").classList.add("unsaved");
+    });
+    el("server-url").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") applyUrl();
+    });
+    el("apply-url").addEventListener("click", applyUrl);
 
     await poll();
     setInterval(poll, 300);
