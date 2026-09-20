@@ -26,10 +26,10 @@ network and gets boxes back.
 Two loops at different rates, which is what keeps the motion smooth despite a
 detector that only answers a handful of times per second:
 
-| Loop           | Rate    | Job                                                      |
-| -------------- | ------- | -------------------------------------------------------- |
-| Vision thread  | ~12 Hz  | Detect, pick the target, convert its pixel to a head pose |
-| Control loop   | 50 Hz   | Slew the head toward that pose                            |
+| Loop          | Rate   | Job                                                       |
+| ------------- | ------ | --------------------------------------------------------- |
+| Vision thread | ~12 Hz | Detect, pick the target, convert its pixel to a head pose |
+| Control loop  | 50 Hz  | Slew the head toward that pose                            |
 
 The vision thread turns each detection into an **absolute** head pose, using the
 head pose recorded when the frame was captured. That means a detection arriving
@@ -50,8 +50,8 @@ between two cats and a miss counter so it lets go once the real one leaves.
     uv run gaze-tracker-server --host 0.0.0.0
 
 It serves on port 8100 and picks up CUDA, MPS, or CPU automatically. The default
-model, `yolo11n.pt`, downloads on first run; pass `--model yolo11s.pt` for better
-range at some cost in speed.
+model, `yolo11n.pt`, downloads on first run; see [Choosing a model](#choosing-a-model)
+for why you probably want a bigger one.
 
 Note the machine's LAN address — the robot needs to reach it.
 
@@ -64,15 +64,46 @@ choose a class, and tick **Tracking enabled**.
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.
 
+## Choosing a model
+
+All five YOLO11 sizes are COCO-80 and drop in via `--model`; each downloads on
+first use. Latency below is **measured** on an Apple M4 Pro (14 core, MPS),
+decoding the exact JPEG payload the robot sends — 512 px wide, quality 75 —
+and timing decode plus inference together, median of 30 runs after 8 warmups.
+The mAP column is Ultralytics' published COCO figure, not measured here.
+
+| Model        | Params | Weights | mAP50-95 | 640 px           | 512 px           |
+| ------------ | ------ | ------- | -------- | ---------------- | ---------------- |
+| `yolo11n.pt` | 2.6 M  | 5.4 MB  | 39.5     | 7.1 ms (140 fps) | 6.6 ms (152 fps) |
+| `yolo11s.pt` | 9.4 M  | 18 MB   | 47.0     | 9.8 ms (102 fps) | 8.2 ms (122 fps) |
+| `yolo11m.pt` | 20.1 M | 39 MB   | 51.5     | 18.7 ms (53 fps) | 14.3 ms (70 fps) |
+| `yolo11l.pt` | 25.3 M | 49 MB   | 53.4     | 22.5 ms (45 fps) | 17.1 ms (59 fps) |
+| `yolo11x.pt` | 56.9 M | 109 MB  | 54.7     | 41.3 ms (24 fps) | 29.0 ms (34 fps) |
+
+The app asks for at most `DETECT_HZ` detections per second — an 83 ms budget at
+the default of 12 Hz. On this class of hardware **every size fits**, including
+`yolo11x` with room to spare. The model is not the bottleneck; the request cap
+and the network round trip are.
+
+So pick on accuracy, not speed. `yolo11x` costs +15 mAP over `yolo11n` for 34 ms
+a frame you were going to spend waiting anyway, and that accuracy buys range —
+which is the whole reason detection is off-board. Drop down only if the machine
+running the server is weaker than this, or is doing something else.
+
+Two caveats. These numbers are one machine and one 5-object test image; a slower
+laptop reorders the table. And note the 512 px column is faster only because the
+model letterboxes a smaller input — the server does not pass `imgsz`, so it
+currently runs everything at 640 regardless of what the robot sends.
+
 ## Tuning
 
 Constants live at the top of `gaze_tracker/main.py`:
 
-| Constant     | Default | Effect                                                     |
-| ------------ | ------- | ---------------------------------------------------------- |
-| `DETECT_HZ`  | 12      | Ceiling on detection requests                               |
-| `SLEW_TAU`   | 0.15    | Larger is smoother and laggier; smaller is snappier         |
-| `LOST_AFTER` | 1.5     | Seconds without a detection before the head gives up        |
+| Constant     | Default | Effect                                               |
+| ------------ | ------- | ---------------------------------------------------- |
+| `DETECT_HZ`  | 12      | Ceiling on detection requests                        |
+| `SLEW_TAU`   | 0.15    | Larger is smoother and laggier; smaller is snappier  |
+| `LOST_AFTER` | 1.5     | Seconds without a detection before the head gives up |
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
 are constructor arguments on `TargetSelector` in `gaze_tracker/tracking.py`.
