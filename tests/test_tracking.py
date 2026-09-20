@@ -257,3 +257,44 @@ class TestPosture:
         small = Tracker._idle_pose(t, 0.1).magnitude()
         full = Tracker._idle_pose(t, 1.0).magnitude()
         assert small < full
+
+
+class TestPullTuning:
+    """The panel's responsiveness slider must actually change the motion."""
+
+    def profile(self, pull):
+        """Peak jerk and peak speed for a 40 degree step at this pull."""
+        smoother = PoseSmoother(0.09, 3.5, pull)
+        goal = Rotation.from_euler("z", 40, degrees=True)
+        speeds = []
+        for _ in range(150):
+            previous = smoother.rotation
+            smoother.step(goal, 1 / 50)
+            speeds.append(float((smoother.rotation * previous.inv()).magnitude()) * 50)
+        jerk = np.abs(np.diff(speeds)) / (1 / 50)
+        return jerk.max(), max(speeds)
+
+    def test_lower_pull_is_gentler(self):
+        gentle, brisk = self.profile(4.0), self.profile(60.0)
+        assert gentle[0] < brisk[0], "less pull must mean less jerk"
+        assert gentle[1] < brisk[1], "less pull must mean less speed"
+
+    def test_every_setting_still_reaches_the_goal(self):
+        goal = Rotation.from_euler("z", 40, degrees=True)
+        for pull in (4.0, 20.0, 60.0):
+            smoother = PoseSmoother(0.09, 3.5, pull)
+            for _ in range(600):
+                smoother.step(goal, 1 / 50)
+            assert float((goal * smoother.rotation.inv()).magnitude()) == pytest.approx(
+                0.0, abs=1e-2
+            ), f"pull={pull} must still converge"
+
+    def test_no_setting_overshoots(self):
+        for pull in (4.0, 20.0, 60.0):
+            smoother = PoseSmoother(0.09, 3.5, pull)
+            goal = Rotation.from_euler("z", 30, degrees=True)
+            angles = [
+                np.degrees(smoother.step(goal, 1 / 50).as_euler("zyx")[0])
+                for _ in range(400)
+            ]
+            assert max(angles) <= 30.0 + 1e-6, f"pull={pull} overshot"

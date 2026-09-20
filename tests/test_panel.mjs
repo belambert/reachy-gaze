@@ -40,13 +40,15 @@ function makeEl(id) {
 
 function harness(source) {
     const ids = [
-        "label", "conf", "conf-value", "enabled", "scan", "server-url",
-        "apply-url", "badge-detector", "badge-lock", "badge-fps", "marker", "error",
+        "label", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
+        "server-url", "apply-url", "badge-detector", "badge-lock", "badge-fps",
+        "marker", "error",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
-        enabled: false, label: "person", conf: 0.4, server_url: "http://old:8100",
-        scan: true, locked: false, detector_ok: true, error: "", fps: 0, center: null,
+        enabled: false, label: "person", conf: 0.4, pull: 20,
+        server_url: "http://old:8100", scan: true, locked: false,
+        detector_ok: true, error: "", fps: 0, center: null,
     };
     const posts = [];
     const delays = { state: 0, config: 0 };
@@ -134,6 +136,33 @@ const tests = {
         await sleep(700);
         assert.equal(h.els.enabled.checked, true, "toggle must not flip back");
         assert.equal(h.app.enabled, true);
+    },
+
+    async "a stale poll must not revert the responsiveness slider"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+
+        h.delays.state = 500;
+        await sleep(320);
+
+        h.els.pull.value = 8;
+        h.els.pull.fire("input");
+
+        await sleep(700);
+        assert.equal(Number(h.els.pull.value), 8, "slider must not jump back");
+        assert.equal(h.app.pull, 8);
+    },
+
+    async "each slider writes only its own field"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+
+        h.els.pull.value = 12;
+        h.els.pull.fire("input");
+        await sleep(300);
+
+        assert.deepEqual(h.posts.at(-1), { pull: 12 }, "must not resend conf");
+        assert.equal(h.app.conf, 0.4, "conf must be untouched");
     },
 
     async "Enter applies the URL"() {
