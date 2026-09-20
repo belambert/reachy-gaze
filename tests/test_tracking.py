@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
@@ -249,14 +251,46 @@ class TestPosture:
         assert Tracker._antennas(1.0, t)[0] == pytest.approx(np.deg2rad(20.0))
         assert Tracker._antennas(0.0, t)[0] == pytest.approx(0.0)
 
-    def test_sweep_grows_in_from_nothing(self):
+    def yaw(self, rotation):
+        return np.degrees(rotation.as_euler("zyx")[0])
+
+    @pytest.mark.parametrize("held", [0.0, 12.0, -20.0, 34.0])
+    def test_a_sweep_begins_where_the_head_already_is(self, held):
+        # Regression: the sine ran off a fixed epoch, so starting a sweep threw
+        # the head to centre and then out to an arbitrary phase.
         from tracker.main import Tracker
 
-        t = 3.0
-        assert Tracker._idle_pose(t, 0.0).magnitude() == pytest.approx(0.0)
-        small = Tracker._idle_pose(t, 0.1).magnitude()
-        full = Tracker._idle_pose(t, 1.0).magnitude()
-        assert small < full
+        start = Rotation.from_euler("z", held, degrees=True)
+        phase = Tracker._sweep_phase(start)
+        assert self.yaw(Tracker._idle_pose(0.0, phase)) == pytest.approx(held, abs=1e-6)
+
+    def test_the_sweep_is_continuous_from_its_first_instant(self):
+        from tracker.main import Tracker
+
+        start = Rotation.from_euler("z", 25.0, degrees=True)
+        phase = Tracker._sweep_phase(start)
+        step = abs(self.yaw(Tracker._idle_pose(1 / 50, phase)) - 25.0)
+        assert step < 0.5, "no jump between holding and sweeping"
+
+    def test_a_sweep_heads_outward_not_back_to_centre(self):
+        from tracker.main import Tracker
+
+        phase = Tracker._sweep_phase(Rotation.from_euler("z", 20.0, degrees=True))
+        assert self.yaw(Tracker._idle_pose(0.5, phase)) > 20.0
+
+    def test_a_yaw_beyond_the_sweep_is_clamped_not_undefined(self):
+        from tracker.main import SCAN_DEGREES, Tracker
+
+        phase = Tracker._sweep_phase(Rotation.from_euler("z", 80.0, degrees=True))
+        assert math.isfinite(phase)
+        assert self.yaw(Tracker._idle_pose(0.0, phase)) == pytest.approx(SCAN_DEGREES)
+
+    def test_the_sweep_keeps_its_amplitude(self):
+        from tracker.main import SCAN_DEGREES, Tracker
+
+        reached = [self.yaw(Tracker._idle_pose(t / 10, 0.0)) for t in range(200)]
+        assert max(reached) == pytest.approx(SCAN_DEGREES, abs=0.5)
+        assert min(reached) == pytest.approx(-SCAN_DEGREES, abs=0.5)
 
 
 class TestPullTuning:
