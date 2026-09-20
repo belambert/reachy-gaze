@@ -28,9 +28,64 @@ def pixel_center(
     return ((x + 1) / 2 * max(width - 1, 1), (y + 1) / 2 * max(height - 1, 1))
 
 
-def slew(current: Rotation, goal: Rotation, alpha: float) -> Rotation:
-    """Rotate `current` a fraction `alpha` of the way toward `goal`."""
-    return Rotation.from_rotvec((goal * current.inv()).as_rotvec() * alpha) * current
+class PoseSmoother:
+    """Critically damped second-order follower for an orientation.
+
+    A first-order lag reaches a stepped setpoint with a velocity discontinuity
+    at every step, and the goal here steps with every detection — which is what
+    reads as jerk. Carrying angular velocity as state makes velocity continuous,
+    and critical damping still gets there without overshooting.
+    """
+
+    def __init__(
+        self, tau: float, max_speed: float = 4.0, max_pull: float = 20.0
+    ) -> None:
+        """Follow with time constant `tau`, bounded by `max_speed` and `max_pull`."""
+        self.omega_n = 1.0 / tau
+        self.max_speed = max_speed
+        self.max_pull = max_pull
+        self.rotation = Rotation.identity()
+        self.omega = np.zeros(3)
+
+    def step(self, goal: Rotation, dt: float) -> Rotation:
+        """Advance toward `goal` by `dt` seconds, returning the new orientation."""
+        # Explicit integration diverges once dt is large next to the time
+        # constant, so take several small steps rather than one long one.
+        steps = max(1, int(np.ceil(dt * self.omega_n / 0.25)))
+        h = dt / steps
+
+        for _ in range(steps):
+            err = (goal * self.rotation.inv()).as_rotvec()
+
+            # Capping the pull bounds how much velocity can change in one tick,
+            # which is what stops a big goal step reading as a lurch. Damping is
+            # deliberately left uncapped, so it always retains the authority to
+            # stop the head and critical damping still means no overshoot.
+            pull = self.omega_n**2 * err
+            magnitude = float(np.linalg.norm(pull))
+            if magnitude > self.max_pull:
+                pull *= self.max_pull / magnitude
+
+            accel = pull - 2.0 * self.omega_n * self.omega
+            self.omega = self.omega + accel * h
+
+            speed = float(np.linalg.norm(self.omega))
+            if speed > self.max_speed:
+                self.omega *= self.max_speed / speed
+
+            self.rotation = Rotation.from_rotvec(self.omega * h) * self.rotation
+
+        return self.rotation
+
+    @property
+    def speed(self) -> float:
+        """Current angular speed in rad/s."""
+        return float(np.linalg.norm(self.omega))
+
+    def reset(self) -> None:
+        """Return to the neutral pose, at rest."""
+        self.rotation = Rotation.identity()
+        self.omega = np.zeros(3)
 
 
 def pose_matrix(rot: Rotation) -> npt.NDArray[np.float64]:

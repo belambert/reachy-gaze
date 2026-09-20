@@ -23,16 +23,19 @@ from scipy.spatial.transform import Rotation
 from tracker.detector import COCO_CLASSES, DetectorUnavailable, RemoteDetector
 from tracker.tracking import (
     CenterFilter,
+    PoseSmoother,
     TargetSelector,
     norm_center,
     pixel_center,
     pose_matrix,
-    slew,
 )
 
 CONTROL_HZ = 50.0
 DETECT_HZ = 12.0  # request ceiling; the server is usually quicker than this
-SLEW_TAU = 0.15  # seconds to close ~63% of the angular error
+SMOOTH_TAU = 0.09  # follower time constant; larger is smoother and laggier
+MAX_HEAD_SPEED = 3.5  # rad/s ceiling on commanded head rotation
+MAX_HEAD_PULL = 20.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
+BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 LOST_AFTER = 1.5  # seconds without a detection before giving up the lock
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
@@ -129,40 +132,55 @@ class Tracker(ReachyMiniApp):
     def _drive(
         self, mini: ReachyMini, state: State, stop_event: threading.Event
     ) -> None:
-        """Slew the head toward the current goal at a steady rate."""
+        """Follow the current goal, keeping commanded velocity continuous."""
         period = 1.0 / CONTROL_HZ
-        current = Rotation.identity()
+        smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
+        lock_level = 0.0
         t0 = time.monotonic()
         last = t0
-        tick = 0
+        next_tick = t0
 
         while not stop_event.is_set():
             now = time.monotonic()
             dt = min(now - last, 0.1)  # a scheduling hiccup must not cause a lurch
             last = now
 
-            # Refresh the cached actual pose at ~10 Hz; the vision thread aims
-            # against it and every SDK call belongs on this thread.
-            if tick % 5 == 0:
-                with state.lock:
-                    state.head_pose = mini.get_current_head_pose()
-            tick += 1
-
+            # Cheap: the SDK's receive thread keeps this up to date for us.
+            pose = mini.get_current_head_pose()
             with state.lock:
+                state.head_pose = pose
                 goal = state.goal
                 fresh = goal is not None and now - state.last_seen < LOST_AFTER
                 scanning = state.enabled and state.scan and not fresh
 
+            # One eased scalar drives both postures, so nothing steps on a
+            # transition: antennas blend, and the sweep grows in rather than
+            # starting at full swing.
+            lock_level += (float(fresh) - lock_level) * (
+                1.0 - math.exp(-dt / BLEND_TAU)
+            )
+
             if not fresh:
-                goal = self._idle_pose(now - t0) if scanning else Rotation.identity()
+                goal = (
+                    self._idle_pose(now - t0, 1.0 - lock_level)
+                    if scanning
+                    else Rotation.identity()
+                )
 
             assert goal is not None
-            current = slew(current, goal, 1.0 - math.exp(-dt / SLEW_TAU))
             mini.set_target(
-                head=pose_matrix(current),
-                antennas=self._antennas(fresh, now - t0),
+                head=pose_matrix(smoother.step(goal, dt)),
+                antennas=self._antennas(lock_level, now - t0),
             )
-            time.sleep(period)
+
+            # Absolute deadlines: sleeping a fixed period would let the loop
+            # drift by however long the work took, jittering the command rate.
+            next_tick += period
+            delay = next_tick - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            else:
+                next_tick = time.monotonic()  # fell behind; resync, don't spin
 
     def _track(
         self, mini: ReachyMini, state: State, stop_event: threading.Event
@@ -261,19 +279,18 @@ class Tracker(ReachyMiniApp):
         logger.info("Fetched %d classes from %s", len(classes), detector.url)
 
     @staticmethod
-    def _idle_pose(t: float) -> Rotation:
+    def _idle_pose(t: float, scale: float) -> Rotation:
         """A slow yaw sweep, so a lost target has a chance of wandering back in."""
         return Rotation.from_euler(
-            "z", 35.0 * math.sin(2 * math.pi * 0.08 * t), degrees=True
+            "z", scale * 35.0 * math.sin(2 * math.pi * 0.08 * t), degrees=True
         )
 
     @staticmethod
-    def _antennas(locked: bool, t: float) -> np.ndarray:
-        """Perked up when locked on, idly wagging when searching."""
-        if locked:
-            return np.deg2rad([20.0, -20.0])
-        a = 12.0 * math.sin(2 * math.pi * 0.3 * t)
-        return np.deg2rad([a, -a])
+    def _antennas(lock_level: float, t: float) -> np.ndarray:
+        """Wagging while searching, perked up when locked, blended in between."""
+        wag = 12.0 * math.sin(2 * math.pi * 0.3 * t)
+        angle = wag + lock_level * (20.0 - wag)
+        return np.deg2rad([angle, -angle])
 
     def _mount_api(self, state: State) -> None:
         """Expose the control panel's read and write endpoints."""
