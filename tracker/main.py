@@ -152,7 +152,7 @@ class Tracker(ReachyMiniApp):
         logger.info("Control loop running at %.0f Hz", CONTROL_HZ)
         period = 1.0 / CONTROL_HZ
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
-        lock_level = 0.0
+        perk = 0.0
         sweeping = False
         sweep_t0 = 0.0
         sweep_phase = 0.0
@@ -183,9 +183,8 @@ class Tracker(ReachyMiniApp):
                 scanning = state.enabled and state.scan and not aimed
                 smoother.max_pull = state.pull  # tunable live from the panel
 
-            lock_level += (float(aimed) - lock_level) * (
-                1.0 - math.exp(-dt / BLEND_TAU)
-            )
+            # 0 searching, 1 locked on, eased so the antennas never snap.
+            perk += (float(aimed) - perk) * (1.0 - math.exp(-dt / BLEND_TAU))
 
             # Start each sweep from wherever the head already is. Running the
             # sine off a fixed epoch meant it began at an arbitrary phase, so
@@ -205,7 +204,7 @@ class Tracker(ReachyMiniApp):
             assert goal is not None
             mini.set_target(
                 head=pose_matrix(smoother.step(goal, dt)),
-                antennas=self._antennas(lock_level, now - t0),
+                antennas=self._antennas(perk, now - t0),
             )
 
             # Absolute deadlines: sleeping a fixed period would let the loop
@@ -346,10 +345,10 @@ class Tracker(ReachyMiniApp):
         return math.asin(max(-1.0, min(1.0, yaw / SCAN_DEGREES)))
 
     @staticmethod
-    def _antennas(lock_level: float, t: float) -> np.ndarray:
+    def _antennas(perk: float, t: float) -> np.ndarray:
         """Wagging while searching, perked up when locked, blended in between."""
         wag = 12.0 * math.sin(2 * math.pi * 0.3 * t)
-        angle = wag + lock_level * (20.0 - wag)
+        angle = wag + perk * (20.0 - wag)
         return np.deg2rad([angle, -angle])
 
     def _mount_api(self, state: State) -> None:
