@@ -12,11 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      # The robot SDK pulls PyGObject, which builds against cairo and
-      # girepository. The runners ship neither, and the control loop's tests
-      # import the app itself, so there is no getting away without them.
+      # The control loop's tests import the app, so the robot SDK has to import
+      # too: PyGObject builds against cairo and girepository, and the SDK asks
+      # gi for the GStreamer typelibs at import time.
       - run: sudo apt-get update
-      - run: sudo apt-get install -y libcairo2-dev libgirepository1.0-dev
+      - run: >
+          sudo apt-get install -y libcairo2-dev libgirepository1.0-dev
+          gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
       - run: uv sync --extra dev
       - run: uv run pytest tests -q
       # The control panel's state sync has races that only show up under
