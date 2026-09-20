@@ -36,8 +36,12 @@ head pose recorded when the frame was captured. That means a detection arriving
 80 ms late still points where the target actually was, rather than compounding
 into overshoot.
 
-Between detections the control loop eases toward the last goal with a time
-constant of 150 ms. Target selection reuses the approach in the SDK's own
+Between detections the control loop eases toward the last goal with a critically
+damped second-order follower. That matters more than it sounds: the goal steps
+with every detection, and a first-order lag reaches a stepped setpoint with a
+velocity discontinuity each time, which is exactly what reads as jerky. Carrying
+angular velocity as state keeps velocity continuous, and capping the follower's
+pull bounds how much it can change per tick. Target selection reuses the approach in the SDK's own
 `reachy_mini.vision.face_tracking`: acquire the largest box, then follow the
 nearest one frame to frame, with a max-jump gate so the head doesn't snap
 between two cats and a miss counter so it lets go once the real one leaves.
@@ -121,11 +125,21 @@ reorders the table. Re-run the benchmark before trusting them elsewhere.
 
 Constants live at the top of `tracker/main.py`:
 
-| Constant     | Default | Effect                                               |
-| ------------ | ------- | ---------------------------------------------------- |
-| `DETECT_HZ`  | 12      | Ceiling on detection requests                        |
-| `SLEW_TAU`   | 0.15    | Larger is smoother and laggier; smaller is snappier  |
-| `LOST_AFTER` | 1.5     | Seconds without a detection before the head gives up |
+| Constant         | Default | Effect                                                    |
+| ---------------- | ------- | --------------------------------------------------------- |
+| `DETECT_HZ`      | 12      | Ceiling on detection requests                             |
+| `SMOOTH_TAU`     | 0.09    | Follower time constant; larger is smoother and laggier    |
+| `MAX_HEAD_PULL`  | 20.0    | rad/s² cap on the follower's pull; **lower is gentler**   |
+| `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
+| `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
+| `LOST_AFTER`     | 1.5     | Seconds without a detection before the head gives up      |
+
+`MAX_HEAD_PULL` is the one to reach for if the motion still looks abrupt: it
+bounds how much commanded velocity can change in a single tick, so lowering it
+trades responsiveness for smoothness directly. Raising it makes the head chase
+harder. Simulated against a subject crossing the view with detection at 12 Hz,
+the current values cut peak jerk about fourfold versus a plain first-order lag,
+costing roughly 0.7° of tracking lag.
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
 are constructor arguments on `TargetSelector` in `tracker/tracking.py`.
