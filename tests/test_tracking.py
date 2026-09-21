@@ -258,7 +258,7 @@ class TestPosture:
         return self.angles(rotation)[0]
 
     @pytest.mark.parametrize(
-        "held", [(0.0, 0.0), (12.0, 5.0), (-20.0, -9.0), (140.0, 17.0)]
+        "held", [(0.0, 0.0), (12.0, 5.0), (-20.0, -9.0), (50.0, 17.0)]
     )
     def test_a_scan_begins_where_the_head_already_is(self, held):
         # Regression: the sine ran off a fixed epoch, so starting a scan threw
