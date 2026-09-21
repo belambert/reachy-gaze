@@ -42,7 +42,7 @@ MAX_HEAD_PULL = 10.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
 BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 # The body's yaw joint stops at +/-160 degrees, so a true 360 is out of reach;
 # this leaves a little margin and covers everything but a wedge directly behind.
-SCAN_DEGREES = 150.0  # half-width of the yaw scan
+SCAN_DEGREES = 60.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 SCAN_PITCH_DEGREES = 18.0  # how far the scan looks up and down
 SCAN_PITCH_HZ = 0.11  # deliberately not a multiple of SCAN_HZ, so the two axes
