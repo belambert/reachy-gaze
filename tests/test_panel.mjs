@@ -51,7 +51,7 @@ function harness(source, { stateStatus = 200 } = {}) {
         enabled: true, labels: ["person", "cat", "dog", "bird"], label: "",
         conf: 0.4, pull: 20, server_url: "http://old:8100", scan: true,
         locked: false, detector_ok: true, error: "", fps: 0, center: null,
-        seen_ago: null, surveying: false,
+        seen_ago: null,
     };
     const posts = [];
     const delays = { state: 0, config: 0 };
@@ -143,19 +143,6 @@ const tests = {
         Object.assign(h.app, { locked: false, seen_ago: null });
         await sleep(400);
         assert.equal(lock.textContent, "searching");
-    },
-
-    async "the lock badge says when it is off looking for someone else"() {
-        const h = harness(SOURCE);
-        Object.assign(h.app, { locked: true, seen_ago: 0.2, label: "cat" });
-        await sleep(400);
-        assert.equal(h.els["badge-lock"].textContent, "locked: cat");
-
-        // Still a live lock, but the head has deliberately left it.
-        h.app.surveying = true;
-        await sleep(400);
-        assert.equal(h.els["badge-lock"].textContent, "looking around");
-        assert.ok(h.els["badge-lock"].classList.contains("warn"));
     },
 
     async "a stale poll must not steal what was typed"() {
