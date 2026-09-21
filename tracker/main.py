@@ -40,8 +40,8 @@ SMOOTH_TAU = 0.09  # follower time constant; larger is smoother and laggier
 MAX_HEAD_SPEED = 3.5  # rad/s ceiling on commanded head rotation
 MAX_HEAD_PULL = 10.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
 BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
-# The body's yaw joint stops at +/-160 degrees, so a true 360 is out of reach;
-# this leaves a little margin and covers everything but a wedge directly behind.
+# The body's yaw joint allows +/-160 degrees; this keeps the scan to the front
+# of the robot, well inside that.
 SCAN_DEGREES = 60.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 SCAN_PITCH_DEGREES = 18.0  # how far the scan looks up and down

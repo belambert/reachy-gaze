@@ -385,8 +385,8 @@ class TestPullTuning:
 class TestNoWhip:
     """A target spotted far off must be approached, never lunged at.
 
-    The scan reaches almost all the way around, so a target can be acquired
-    most of a turn away from where the head is pointing.
+    A target can be acquired well off to one side of where the head is
+    pointing, at the far end of a scan or after a hold elsewhere.
     """
 
     def peak_speed(self, offset, pull=None, seconds=30):

@@ -56,8 +56,8 @@ not pull the head off a person standing right there. The preference does not
 run backwards: once on the cat, a person cannot take it back.
 
 When detections stop, the head keeps its aim on the last known position for
-`LOST_AFTER` seconds before it starts scanning the room — nearly all the way
-round, and up and down — so a subject that steps behind something is still
+`LOST_AFTER` seconds before it starts scanning the room — 60° either side of
+centre, and up and down — so a subject that steps behind something is still
 being watched when it reappears. The panel distinguishes the
 two: **locked** while sightings are arriving, **holding** with the age of the
 last one while the head waits it out.
@@ -163,20 +163,19 @@ Constants live at the top of `tracker/main.py`:
 Yaw and pitch each follow a sine at a different rate, so the head traces a
 pattern over the room rather than retracing one stripe across it — which is why
 `SCAN_PITCH_HZ` must not be a multiple of `SCAN_HZ`. One cycle takes 25 s and
-covers **296° of yaw and 36° of pitch**.
+covers **120° of yaw and 36° of pitch**.
 
-It is not the full 360: the body's `yaw_body` joint stops at ±160°, and
-`SCAN_DEGREES` leaves margin off that. A wedge directly behind the robot cannot
-be seen at all, so a subject that leaves that way has to come back into view on
-its own.
+That is the front of the room only. The body's `yaw_body` joint would allow
+±160°, so there is room to widen `SCAN_DEGREES`, but as it stands a subject that
+leaves to the side or behind has to come back into view on its own.
 
 Each scan is phase-aligned to the head's current pose, on both axes, so it picks
 up from wherever the head was holding instead of snapping to centre first.
 
 ### Why it never whips round
 
-A target can be acquired most of a turn away from where the head is pointing,
-and the head must not lunge at it. It can't, and the reason is `MAX_HEAD_PULL`
+A target can be acquired well off to one side of where the head is pointing —
+at the far end of a scan, say — and the head must not lunge at it. It can't, and the reason is `MAX_HEAD_PULL`
 rather than anything in the scan: once the spring term saturates, the follower
 settles at the speed where the capped pull balances damping,
 
@@ -191,17 +190,17 @@ The catch is that this ceiling is the **Responsiveness** slider's, not a fixed
 one. At 60 the terminal speed is 155°/s, and the robot will whip. If you raise
 it for snappier tracking, that is what you are trading away.
 
-For comparison, over a full scan cycle:
+For comparison, over a full scan cycle starting from rest:
 
 | Motion                          | Peak speed | Peak acceleration |
 | ------------------------------- | ---------- | ----------------- |
-| Scan, 150° yaw and 18° pitch    | 26 °/s     | 171 °/s²          |
+| Scan, 60° yaw and 18° pitch     | 19 °/s     | 84 °/s²           |
 | Tracking a 40° step (pull 10)   | 26 °/s     | 318 °/s²          |
 
 The scan is gentler than ordinary tracking, so if it looks unsteady on hardware
-the commanded path is not the cause. Look instead at automatic body yaw, which a
-±150° scan leans on for nearly all of its travel, or at the servos, which judder
-at the very low speeds around each turnaround.
+the commanded path is not the cause. Look instead at automatic body yaw, if the
+scan is widened far enough to lean on it, or at the servos, which judder at the
+very low speeds around each turnaround.
 
 `MAX_HEAD_PULL` is only the starting value — the control panel's
 **Responsiveness** slider changes it live, so there is no need to edit code and
