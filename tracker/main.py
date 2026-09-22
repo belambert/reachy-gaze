@@ -51,9 +51,9 @@ LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
-# Prefilled in the control panel. Override without editing code by setting
-# TRACKER_SERVER_URL; a DHCP lease will eventually make this one wrong.
-DEFAULT_SERVER_URL = os.environ.get("TRACKER_SERVER_URL", "http://10.0.0.206:8100")
+# The Triton vision-server's gRPC endpoint, host:port. Prefilled in the control
+# panel; override without editing code by setting TRACKER_SERVER_URL.
+DEFAULT_SERVER_URL = os.environ.get("TRACKER_SERVER_URL", "spark-10cf:8101")
 
 logger = logging.getLogger(__name__)
 

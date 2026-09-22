@@ -8,8 +8,9 @@ from typing import Protocol
 
 import numpy as np
 import numpy.typing as npt
-import requests
+import tritonclient.grpc as grpcclient
 from PIL import Image
+from tritonclient.utils import InferenceServerException
 
 # The 80 COCO classes, bundled so the control panel can populate its picker
 # before the detection server has ever been reached.
@@ -70,15 +71,24 @@ class DetectorUnavailable(RuntimeError):
     """The detection service could not be reached or returned garbage."""
 
 
+# The ensemble the robot talks to; see the vision-server repo. Detectors swap
+# behind this name, so the client never learns which one is loaded.
+TRACKER_MODEL = "tracker"
+
+
 class RemoteDetector:
-    """Detector backed by an HTTP service, typically a laptop with a GPU.
+    """Detector backed by the Triton vision-server, over gRPC.
 
-    Frames are downscaled and JPEG-encoded before going over the network; boxes
-    come back in downscaled coordinates and are rescaled to the source frame so
-    callers can use them against the camera intrinsics.
+    Frames are downscaled and JPEG-encoded before going over the network; the
+    server runs pre/post-processing and answers with boxes in the pixels of the
+    JPEG it was sent, which are rescaled to the source frame so callers can use
+    them against the camera intrinsics.
 
-    The default width matches YOLO's native 640 px, so the model isn't handed an
-    upscaled image; at JPEG quality 75 a frame is only tens of kilobytes.
+    gRPC rather than HTTP JSON on purpose: JSON spends a decimal number per JPEG
+    byte and inflates each frame ~4.6x, enough to blow the robot's wifi budget
+    at the detection rate. The default width matches YOLO's native 640 px, so
+    the model isn't handed an upscaled image; at JPEG quality 75 a frame is only
+    tens of kilobytes.
     """
 
     def __init__(
@@ -88,58 +98,75 @@ class RemoteDetector:
         quality: int = 75,
         timeout: float = 2.0,
     ) -> None:
-        """Point the detector at a service base URL, e.g. http://192.168.1.20:8100."""
-        self.url = url.rstrip("/")
+        """Point the detector at a Triton gRPC endpoint, e.g. spark-10cf:8101."""
+        # tritonclient wants a bare host:port; tolerate a pasted scheme anyway
+        self.url = url.split("://", 1)[-1].rstrip("/")
         self.width = width
         self.quality = quality
         self.timeout = timeout
-        self._session = requests.Session()
+        self._client = grpcclient.InferenceServerClient(url=self.url)
 
     def classes(self) -> list[str]:
-        """Ask the service for its vocabulary.
+        """Confirm the ensemble is loaded and report its vocabulary.
+
+        The contract exposes no class-list endpoint, so this checks the model is
+        ready — which doubles as the startup reachability probe — and returns
+        the COCO labels the ensemble is built against.
 
         Raises:
-            DetectorUnavailable: If the service cannot be reached or answers
-                with something other than a class list.
+            DetectorUnavailable: If the server cannot be reached or the model
+                is not loaded.
 
         """
         try:
-            resp = self._session.get(f"{self.url}/classes", timeout=self.timeout)
-            resp.raise_for_status()
-            return list(resp.json()["classes"])
-        except requests.RequestException as e:
+            if not self._client.is_model_ready(TRACKER_MODEL):
+                raise DetectorUnavailable(f"{self.url}: {TRACKER_MODEL} not ready")
+        except InferenceServerException as e:
             raise DetectorUnavailable(f"{self.url}: {e}") from e
-        except (KeyError, ValueError) as e:
-            raise DetectorUnavailable(f"{self.url}: bad class list") from e
+        return list(COCO_CLASSES)
 
     def detect(
         self, frame: npt.NDArray[np.uint8], labels: list[str], conf: float
     ) -> list[Detection]:
-        """POST one frame and return the boxes, in source-frame pixels."""
+        """Infer one frame and return the boxes, in source-frame pixels."""
         jpeg, scale = self._encode(frame)
+        inputs = [
+            self._input("JPEG", np.frombuffer(jpeg, dtype=np.uint8), "UINT8"),
+            self._input("KEEP", np.array(labels, dtype=object), "BYTES"),
+            self._input("CONF", np.array([conf], dtype=np.float32), "FP32"),
+        ]
+        outputs = [
+            grpcclient.InferRequestedOutput(n) for n in ("BOXES", "SCORES", "LABELS")
+        ]
         try:
-            resp = self._session.post(
-                f"{self.url}/detect",
-                params={"labels": ",".join(labels), "conf": conf},
-                data=jpeg,
-                headers={"Content-Type": "image/jpeg"},
-                timeout=self.timeout,
+            result = self._client.infer(
+                TRACKER_MODEL,
+                inputs=inputs,
+                outputs=outputs,
+                client_timeout=self.timeout,
             )
-            resp.raise_for_status()
-            payload = resp.json()
-        except requests.RequestException as e:
+        except InferenceServerException as e:
             raise DetectorUnavailable(f"{self.url}: {e}") from e
-        except ValueError as e:
-            raise DetectorUnavailable(f"{self.url}: bad JSON response") from e
 
+        boxes = result.as_numpy("BOXES")
+        if boxes is None or boxes.size == 0:
+            return []
+        scores, out_labels = result.as_numpy("SCORES"), result.as_numpy("LABELS")
         return [
             Detection(
-                label=d["label"],
-                conf=float(d["conf"]),
-                box=tuple(float(c) * scale for c in d["box"]),  # type: ignore[arg-type]
+                label=lbl.decode() if isinstance(lbl, bytes) else str(lbl),
+                conf=float(score),
+                box=tuple(float(c) * scale for c in box),  # type: ignore[arg-type]
             )
-            for d in payload.get("detections", [])
+            for box, score, lbl in zip(boxes.reshape(-1, 4), scores, out_labels)
         ]
+
+    @staticmethod
+    def _input(name: str, data: np.ndarray, dtype: str) -> grpcclient.InferInput:
+        """A Triton input tensor carrying `data`."""
+        inp = grpcclient.InferInput(name, list(data.shape), dtype)
+        inp.set_data_from_numpy(data)
+        return inp
 
     def _encode(self, frame: npt.NDArray[np.uint8]) -> tuple[bytes, float]:
         """Return (JPEG bytes, factor mapping encoded pixels back to source)."""

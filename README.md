@@ -64,42 +64,39 @@ last one while the head waits it out.
 
 ## Running it
 
-### 1. Start the detector, on your laptop
+### 1. Start the detector
 
-    uv sync --extra server
-    uv run tracker-server --host 0.0.0.0
+The robot talks to the **vision-server**, a Triton Inference Server that takes a
+JPEG and returns boxes. Set it up on the Spark from its own repo; the short
+version is:
 
-It serves on port 8100 and picks up CUDA, MPS, or CPU automatically. The default
-model, `yolo11x.pt`, is the most accurate of the family and downloads 109 MB on
-first run; pass `--model yolo11s.pt` if the machine is modest. See
-[Choosing a model](#choosing-a-model).
+    scripts/build_engine.sh    # one-off, builds the TensorRT plan
+    scripts/serve.sh           # serves gRPC on 8101 (and HTTP 8100, metrics 8102)
 
-Note the machine's LAN address — the robot needs to reach it.
+Note the Spark's address — the robot reaches it over wifi. Check it is up:
 
-The server logs first contact, a summary every 10 s, and when a client goes
-quiet — enough to tell "the robot isn't reaching me" from "it is, and the
-detections are empty" without a line per frame:
+    curl -sf <spark>:8100/v2/health/ready && echo READY || echo "NOT READY"
 
-    Serving yolo11x.pt on mps at http://0.0.0.0:8100
-    first contact from 10.0.0.42
-    served class list (80 classes) to 10.0.0.42
-    10.0.0.42: 118 req in 10s (11.8/s), 41 ms avg, 1.2 det/req
-    10.0.0.42 went quiet after 118 requests
+The client uses **gRPC on 8101**, not HTTP JSON on 8100: JSON spends a decimal
+number per JPEG byte and inflates each frame ~4.6x, enough to blow the wifi
+budget at 12 Hz. HTTP 8100 is for probing by hand.
 
-Pass `--verbose` to add uvicorn's per-request access log when debugging.
+The bundled `tracker-server` (`uv sync --extra server`, then `tracker-server`)
+is a simpler FastAPI + Ultralytics detector for local use, but it speaks the old
+HTTP protocol the client no longer uses. See [Choosing a model](#choosing-a-model)
+for its model options.
 
 ### 2. Start the app, on the robot
 
 Install it as a Reachy Mini app, then open the control panel at
-<http://localhost:8042>. Check that **Detector** points at the machine running
-the server.
+<http://localhost:8042>. Check that **Detector** points at the Spark's gRPC
+endpoint, `<spark>:8101` — a bare `host:port`, no `http://`.
 
 Tracking is **on from the moment the app starts** — untick **Tracking enabled**
 to stop it. That setting is not persisted, so a restart begins tracking again.
 
-The field is prefilled from `DEFAULT_SERVER_URL` in `tracker/main.py`. Set
-`TRACKER_SERVER_URL` to change it without editing code — worth doing if the
-server's address comes from DHCP and moves.
+The field is prefilled from `DEFAULT_SERVER_URL` in `tracker/main.py`
+(`spark-10cf:8101`). Set `TRACKER_SERVER_URL` to change it without editing code.
 
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.
@@ -235,9 +232,12 @@ frame coordinates for a head that doesn't dither on detector noise.
 ## Swapping the detector
 
 `tracker/detector.py` defines a `Detector` protocol — `classes()` and
-`detect(frame, labels, conf)`. `RemoteDetector` is the HTTP implementation. An
-on-device backend, or an open-vocabulary model like YOLOE that takes free-text
-prompts instead of a fixed 80 classes, only has to satisfy that protocol.
+`detect(frame, labels, conf)`. `RemoteDetector` implements it against the
+vision-server's `tracker` ensemble over Triton gRPC, sending a JPEG, the labels
+to keep, and a confidence threshold. Detectors swap behind the ensemble name on
+the server, so an open-vocabulary model that takes free-text prompts instead of
+a fixed 80 classes needs no client change. An on-device backend, or any other
+service, only has to satisfy the protocol.
 
 ## Development
 

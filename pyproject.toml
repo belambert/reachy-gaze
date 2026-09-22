@@ -11,7 +11,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "reachy-mini",
-    "pillow",  # the robot has no JPEG encoder; opencv is an optional extra
+    "pillow", # the robot has no JPEG encoder; opencv is an optional extra
+    "tritonclient[grpc]", # talks to the vision-server ensemble over gRPC
 ]
 keywords = ["reachy-mini-app"]
 
