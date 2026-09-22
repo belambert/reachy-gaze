@@ -43,15 +43,19 @@ function makeEl(id) {
 function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
-        "server-url", "apply-url", "badge-detector", "badge-lock", "badge-fps",
-        "marker", "error",
+        "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
+        "badge-fps", "marker", "error",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
         enabled: true, labels: ["person", "cat", "dog", "bird"], label: "",
         conf: 0.4, pull: 20, server_url: "http://old:8100", scan: true,
         locked: false, detector_ok: true, error: "", fps: 0, center: null,
-        seen_ago: null,
+        seen_ago: null, backend: "triton",
+        backends: [
+            { key: "triton", label: "Triton (vision-server)", default_url: "spark-10cf:8101" },
+            { key: "builtin", label: "Built-in server", default_url: "http://10.0.0.206:8100" },
+        ],
     };
     const posts = [];
     const delays = { state: 0, config: 0 };
@@ -109,6 +113,27 @@ const tests = {
         h.app.labels = ["cat"];
         await sleep(400);
         assert.equal(h.els.labels.textContent, "cats");
+    },
+
+    async "the backend selector lists the options and marks the current one"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+        assert.deepEqual(h.els.backend.options.map((o) => o.value), ["triton", "builtin"]);
+        assert.equal(h.els.backend.value, "triton");
+    },
+
+    async "switching backend seeds its default address and posts both"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+
+        h.els.backend.value = "builtin";
+        h.els.backend.fire("change");
+        await sleep(30);
+
+        const post = h.posts.at(-1);
+        assert.equal(post.backend, "builtin");
+        assert.equal(post.server_url, "http://10.0.0.206:8100");
+        assert.equal(h.els["server-url"].value, "http://10.0.0.206:8100");
     },
 
     async "an unreachable app is reported, not swallowed"() {

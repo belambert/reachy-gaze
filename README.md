@@ -89,14 +89,18 @@ for its model options.
 ### 2. Start the app, on the robot
 
 Install it as a Reachy Mini app, then open the control panel at
-<http://localhost:8042>. Check that **Detector** points at the Spark's gRPC
-endpoint, `<spark>:8101` — a bare `host:port`, no `http://`.
+<http://localhost:8042>. Pick the **Backend** — `Triton (vision-server)` or the
+`Built-in server` — and check its **Detector** address. Triton wants a bare
+`host:port` gRPC endpoint like `<spark>:8101`; the built-in server wants an
+`http://host:8100` URL. Switching backend fills in that backend's default
+address, which you can then edit.
 
 Tracking is **on from the moment the app starts** — untick **Tracking enabled**
 to stop it. That setting is not persisted, so a restart begins tracking again.
 
-The field is prefilled from `DEFAULT_SERVER_URL` in `tracker/main.py`
-(`spark-10cf:8101`). Set `TRACKER_SERVER_URL` to change it without editing code.
+The backend and address are prefilled from `DEFAULT_BACKEND` and
+`DEFAULT_SERVER_URL` in `tracker/main.py` (Triton on `spark-10cf:8101`). Set
+`TRACKER_BACKEND` and `TRACKER_SERVER_URL` to change them without editing code.
 
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.
@@ -232,12 +236,17 @@ frame coordinates for a head that doesn't dither on detector noise.
 ## Swapping the detector
 
 `tracker/detector.py` defines a `Detector` protocol — `classes()` and
-`detect(frame, labels, conf)`. `RemoteDetector` implements it against the
-vision-server's `tracker` ensemble over Triton gRPC, sending a JPEG, the labels
-to keep, and a confidence threshold. Detectors swap behind the ensemble name on
-the server, so an open-vocabulary model that takes free-text prompts instead of
-a fixed 80 classes needs no client change. An on-device backend, or any other
-service, only has to satisfy the protocol.
+`detect(frame, labels, conf)` — and the backends that implement it:
+`TritonDetector` (the vision-server's `tracker` ensemble over gRPC) and
+`BuiltinDetector` (the built-in FastAPI server over HTTP). Both send a JPEG, the
+labels to keep, and a confidence threshold.
+
+Backends are registered in the `BACKENDS` table at the bottom of that file, and
+the control panel selects between them — `snapshot()` reports the list. **To add
+one:** write a class satisfying the protocol and add a line to `BACKENDS` giving
+its key, label, default address, and constructor. An on-device backend, or an
+open-vocabulary model that takes free-text prompts instead of a fixed 80
+classes, only has to satisfy the protocol.
 
 ## Development
 

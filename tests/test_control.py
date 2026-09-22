@@ -126,3 +126,29 @@ class TestHoldWindow:
         snap = self.state_at(11.0)
         assert snap["locked"] is False
         assert snap["seen_ago"] is None, "no point reporting staleness once given up"
+
+
+class TestBackendSelection:
+    """The detector backend is selectable, and the panel is told the options."""
+
+    def test_the_default_backend_is_reported(self):
+        from tracker.main import DEFAULT_BACKEND
+
+        assert State().snapshot()["backend"] == DEFAULT_BACKEND
+
+    def test_the_options_are_listed_for_the_panel(self):
+        listed = {b["key"] for b in State().snapshot()["backends"]}
+        assert {"triton", "builtin"} <= listed
+
+    def test_config_accepts_a_known_backend(self):
+        from tracker.main import Config
+
+        assert Config(backend="builtin").backend == "builtin"
+
+    def test_config_rejects_an_unknown_backend(self):
+        from pydantic import ValidationError
+
+        from tracker.main import Config
+
+        with pytest.raises(ValidationError):
+            Config(backend="nope")

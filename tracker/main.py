@@ -15,12 +15,12 @@ import threading
 import time
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
-from tracker.detector import DetectorUnavailable, RemoteDetector
+from tracker.detector import BACKENDS, Detector, DetectorUnavailable, make_detector
 from tracker.tracking import (
     CenterFilter,
     PoseSmoother,
@@ -51,9 +51,12 @@ LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
-# The Triton vision-server's gRPC endpoint, host:port. Prefilled in the control
-# panel; override without editing code by setting TRACKER_SERVER_URL.
-DEFAULT_SERVER_URL = os.environ.get("TRACKER_SERVER_URL", "spark-10cf:8101")
+# Which detection backend to use, and where to reach it. Both are prefilled in
+# the control panel and overridable from the environment without editing code.
+DEFAULT_BACKEND = os.environ.get("TRACKER_BACKEND", "triton")
+DEFAULT_SERVER_URL = os.environ.get(
+    "TRACKER_SERVER_URL", BACKENDS[DEFAULT_BACKEND].default_url
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +67,17 @@ class Config(BaseModel):
     enabled: bool | None = None
     conf: float | None = None
     server_url: str | None = None
+    backend: str | None = None
     scan: bool | None = None
     # A pull of zero would freeze the head, so refuse it rather than obey it.
     pull: float | None = Field(None, gt=0.0, le=200.0)
+
+    @field_validator("backend")
+    @classmethod
+    def _known_backend(cls, v: str | None) -> str | None:
+        if v is not None and v not in BACKENDS:
+            raise ValueError(f"unknown backend {v!r}")
+        return v
 
 
 class State:
@@ -83,6 +94,7 @@ class State:
         self.label = ""
         self.conf = 0.4
         self.server_url = DEFAULT_SERVER_URL
+        self.backend = DEFAULT_BACKEND
         self.scan = True
         self.pull = MAX_HEAD_PULL
 
@@ -107,6 +119,11 @@ class State:
                 "label": self.label,
                 "conf": self.conf,
                 "server_url": self.server_url,
+                "backend": self.backend,
+                "backends": [
+                    {"key": k, "label": b.label, "default_url": b.default_url}
+                    for k, b in BACKENDS.items()
+                ],
                 "scan": self.scan,
                 "pull": self.pull,
                 "locked": locked,
@@ -245,21 +262,22 @@ class Tracker(ReachyMiniApp):
 
         selector = TargetSelector(TRACK_LABELS)
         smoother = CenterFilter()
-        detector: RemoteDetector | None = None
-        detector_url = ""
+        detector: Detector | None = None
+        detector_key: tuple[str, str] | None = None
         period = 1.0 / DETECT_HZ
 
         while not stop_event.is_set():
             started = time.monotonic()
             with state.lock:
-                enabled, conf, url = state.enabled, state.conf, state.server_url
+                enabled, conf = state.enabled, state.conf
+                backend, url = state.backend, state.server_url
                 head_pose = state.head_pose
 
-            # Ahead of the enabled check: a new server should be vetted straight
-            # away, not on the next tracking run.
-            if detector is None or url != detector_url:
-                detector = RemoteDetector(url)
-                detector_url = url
+            # Ahead of the enabled check: a new backend or server should be
+            # vetted straight away, not on the next tracking run.
+            if detector is None or (backend, url) != detector_key:
+                detector = make_detector(backend, url)
+                detector_key = (backend, url)
                 selector.reset()
                 smoother.reset()
                 self._check_vocabulary(detector)
@@ -315,7 +333,7 @@ class Tracker(ReachyMiniApp):
                 stop_event.wait(period - elapsed)
 
     @staticmethod
-    def _check_vocabulary(detector: RemoteDetector) -> None:
+    def _check_vocabulary(detector: Detector) -> None:
         """Warn if the server's model cannot see what we are looking for.
 
         The server silently detects *everything* when it recognises none of the
@@ -327,11 +345,12 @@ class Tracker(ReachyMiniApp):
         except DetectorUnavailable as e:
             logger.warning("Could not fetch class list: %s", e)
             return
+        where = getattr(detector, "url", "detector")
         missing = [label for label in TRACK_LABELS if label not in classes]
         if missing:
-            logger.warning("%s does not detect %s", detector.url, ", ".join(missing))
+            logger.warning("%s does not detect %s", where, ", ".join(missing))
         else:
-            logger.info("%s detects all of %s", detector.url, ", ".join(TRACK_LABELS))
+            logger.info("%s detects all of %s", where, ", ".join(TRACK_LABELS))
 
     @staticmethod
     def _scan_pose(t: float, phase: tuple[float, float] = (0.0, 0.0)) -> Rotation:

@@ -15,6 +15,12 @@ let applied = 0;
 // poll overwriting what was typed a moment before it gets read back.
 const dirty = new Set();
 
+// The backends the app offers, and the option keys currently rendered. Kept so
+// switching backend can seed its default URL and the list is rebuilt only when
+// it actually changes.
+let backends = [];
+let backendKeys = "";
+
 async function request(path, options, keys = []) {
     const id = ++seq;
     let state;
@@ -56,6 +62,14 @@ function apply(state) {
     if (!dirty.has("enabled")) el("enabled").checked = state.enabled;
     if (!dirty.has("scan")) el("scan").checked = state.scan;
     if (!dirty.has("server_url")) el("server-url").value = state.server_url;
+
+    backends = state.backends ?? [];
+    const keys = backends.map((b) => b.key).join(",");
+    if (keys !== backendKeys) {
+        backendKeys = keys;
+        el("backend").replaceChildren(...backends.map((b) => new Option(b.label, b.key)));
+    }
+    if (!dirty.has("backend")) el("backend").value = state.backend;
 
     el("conf-value").textContent = Number(el("conf").value).toFixed(2);
     el("pull-value").textContent = Number(el("pull").value).toFixed(0);
@@ -130,6 +144,21 @@ async function init() {
             write({ [id]: e.target.checked });
         });
     }
+
+    // Switching backend seeds its default address, so the change takes effect
+    // at once rather than pointing a new client at the old backend's URL.
+    el("backend").addEventListener("change", (e) => {
+        const spec = backends.find((b) => b.key === e.target.value);
+        dirty.add("backend");
+        if (spec) {
+            dirty.add("server_url");
+            el("server-url").value = spec.default_url;
+            el("server-url").classList.add("unsaved");
+            write({ backend: e.target.value, server_url: spec.default_url });
+        } else {
+            write({ backend: e.target.value });
+        }
+    });
 
     el("server-url").addEventListener("input", () => {
         dirty.add("server_url");

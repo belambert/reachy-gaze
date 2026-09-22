@@ -40,12 +40,16 @@
     <p class="hint note">Lower responsiveness means smoother, laggier motion.</p>
 
     <section class="card">
+        <label class="row">
+            <span>Backend</span>
+            <select id="backend"></select>
+        </label>
         <div class="row">
             <span>Detector</span>
             <input type="text" id="server-url" placeholder="spark-10cf:8101">
             <button id="apply-url">Apply</button>
         </div>
-        <p class="hint">Run <code>tracker-server</code> on that machine.</p>
+        <p class="hint">Address of the selected backend.</p>
     </section>
 
     <section class="card status">

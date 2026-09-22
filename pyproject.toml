@@ -13,6 +13,7 @@ dependencies = [
     "reachy-mini",
     "pillow", # the robot has no JPEG encoder; opencv is an optional extra
     "tritonclient[grpc]", # talks to the vision-server ensemble over gRPC
+    "requests", # the built-in-server backend speaks HTTP
 ]
 keywords = ["reachy-mini-app"]
 

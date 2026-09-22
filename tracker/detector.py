@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 import numpy as np
 import numpy.typing as npt
+import requests
 import tritonclient.grpc as grpcclient
 from PIL import Image
 from tritonclient.utils import InferenceServerException
@@ -71,24 +72,49 @@ class DetectorUnavailable(RuntimeError):
     """The detection service could not be reached or returned garbage."""
 
 
-# The ensemble the robot talks to; see the vision-server repo. Detectors swap
-# behind this name, so the client never learns which one is loaded.
-TRACKER_MODEL = "tracker"
+# --- Detectors ---------------------------------------------------------------
+#
+# One class per detection service, each satisfying the Detector protocol and
+# sharing frame encoding through _JpegDetector. The BACKENDS registry at the
+# bottom is what the app selects between.
+
+TRACKER_MODEL = "tracker"  # the ensemble name the Triton vision-server exposes
 
 
-class RemoteDetector:
+class _JpegDetector:
+    """Frame encoding shared by detectors that send a JPEG over the network.
+
+    Frames are downscaled to `width` and JPEG-encoded; the returned factor maps
+    the encoded pixels back to the source frame, so boxes an off-board detector
+    returns line up with the camera intrinsics. The default width matches YOLO's
+    native 640 px, so the model isn't handed an upscale; at quality 75 a frame
+    is only tens of kilobytes.
+    """
+
+    def __init__(self, width: int = 640, quality: int = 75, timeout: float = 2.0):
+        self.width = width
+        self.quality = quality
+        self.timeout = timeout
+
+    def _encode(self, frame: npt.NDArray[np.uint8]) -> tuple[bytes, float]:
+        """Return (JPEG bytes, factor mapping encoded pixels back to source)."""
+        height, width = frame.shape[:2]
+        rgb = Image.fromarray(frame[..., ::-1])  # camera gives BGR
+        if width > self.width:
+            target = (self.width, max(1, round(height * self.width / width)))
+            rgb = rgb.resize(target, Image.BILINEAR)
+        buf = io.BytesIO()
+        rgb.save(buf, format="JPEG", quality=self.quality)
+        return buf.getvalue(), width / rgb.width
+
+
+class TritonDetector(_JpegDetector):
     """Detector backed by the Triton vision-server, over gRPC.
 
-    Frames are downscaled and JPEG-encoded before going over the network; the
-    server runs pre/post-processing and answers with boxes in the pixels of the
-    JPEG it was sent, which are rescaled to the source frame so callers can use
-    them against the camera intrinsics.
-
-    gRPC rather than HTTP JSON on purpose: JSON spends a decimal number per JPEG
-    byte and inflates each frame ~4.6x, enough to blow the robot's wifi budget
-    at the detection rate. The default width matches YOLO's native 640 px, so
-    the model isn't handed an upscaled image; at JPEG quality 75 a frame is only
-    tens of kilobytes.
+    The server runs pre/post-processing and answers with boxes in the pixels of
+    the JPEG it was sent. gRPC rather than HTTP JSON on purpose: JSON spends a
+    decimal number per JPEG byte and inflates each frame ~4.6x, enough to blow
+    the robot's wifi budget at the detection rate.
     """
 
     def __init__(
@@ -99,11 +125,9 @@ class RemoteDetector:
         timeout: float = 2.0,
     ) -> None:
         """Point the detector at a Triton gRPC endpoint, e.g. spark-10cf:8101."""
+        super().__init__(width, quality, timeout)
         # tritonclient wants a bare host:port; tolerate a pasted scheme anyway
         self.url = url.split("://", 1)[-1].rstrip("/")
-        self.width = width
-        self.quality = quality
-        self.timeout = timeout
         self._client = grpcclient.InferenceServerClient(url=self.url)
 
     def classes(self) -> list[str]:
@@ -168,13 +192,104 @@ class RemoteDetector:
         inp.set_data_from_numpy(data)
         return inp
 
-    def _encode(self, frame: npt.NDArray[np.uint8]) -> tuple[bytes, float]:
-        """Return (JPEG bytes, factor mapping encoded pixels back to source)."""
-        height, width = frame.shape[:2]
-        rgb = Image.fromarray(frame[..., ::-1])  # camera gives BGR
-        if width > self.width:
-            target = (self.width, max(1, round(height * self.width / width)))
-            rgb = rgb.resize(target, Image.BILINEAR)
-        buf = io.BytesIO()
-        rgb.save(buf, format="JPEG", quality=self.quality)
-        return buf.getvalue(), width / rgb.width
+
+class BuiltinDetector(_JpegDetector):
+    """Detector backed by the built-in FastAPI server (see tracker.server).
+
+    A frame is POSTed as JPEG and boxes come back in downscaled coordinates,
+    which are rescaled to the source frame. Simpler than Triton and happy on
+    CPU or MPS, but JSON over HTTP, so meant for a laptop on the same LAN.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        width: int = 640,
+        quality: int = 75,
+        timeout: float = 2.0,
+    ) -> None:
+        """Point the detector at a server base URL, e.g. http://192.168.1.20:8100."""
+        super().__init__(width, quality, timeout)
+        self.url = url.rstrip("/")
+        self._session = requests.Session()
+
+    def classes(self) -> list[str]:
+        """Ask the server for its vocabulary.
+
+        Raises:
+            DetectorUnavailable: If the server cannot be reached or answers with
+                something other than a class list.
+
+        """
+        try:
+            resp = self._session.get(f"{self.url}/classes", timeout=self.timeout)
+            resp.raise_for_status()
+            return list(resp.json()["classes"])
+        except requests.RequestException as e:
+            raise DetectorUnavailable(f"{self.url}: {e}") from e
+        except (KeyError, ValueError) as e:
+            raise DetectorUnavailable(f"{self.url}: bad class list") from e
+
+    def detect(
+        self, frame: npt.NDArray[np.uint8], labels: list[str], conf: float
+    ) -> list[Detection]:
+        """POST one frame and return the boxes, in source-frame pixels."""
+        jpeg, scale = self._encode(frame)
+        try:
+            resp = self._session.post(
+                f"{self.url}/detect",
+                params={"labels": ",".join(labels), "conf": conf},
+                data=jpeg,
+                headers={"Content-Type": "image/jpeg"},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except requests.RequestException as e:
+            raise DetectorUnavailable(f"{self.url}: {e}") from e
+        except ValueError as e:
+            raise DetectorUnavailable(f"{self.url}: bad JSON response") from e
+
+        return [
+            Detection(
+                label=d["label"],
+                conf=float(d["conf"]),
+                box=tuple(float(c) * scale for c in d["box"]),  # type: ignore[arg-type]
+            )
+            for d in payload.get("detections", [])
+        ]
+
+
+# --- Backends ----------------------------------------------------------------
+#
+# The registry the app selects between. Add a backend by writing its Detector
+# above and adding one line here; the control panel picks it up from snapshot().
+
+
+@dataclass(frozen=True)
+class Backend:
+    """A selectable detection backend: how to label it and how to build it."""
+
+    key: str
+    label: str
+    default_url: str
+    factory: Callable[[str], Detector]
+
+
+BACKENDS: dict[str, Backend] = {
+    "triton": Backend(
+        "triton", "Triton (vision-server)", "spark-10cf:8101", TritonDetector
+    ),
+    "builtin": Backend(
+        "builtin", "Built-in server", "http://10.0.0.206:8100", BuiltinDetector
+    ),
+}
+
+
+def make_detector(backend: str, url: str) -> Detector:
+    """Build the client for a named backend, pointed at `url`."""
+    try:
+        spec = BACKENDS[backend]
+    except KeyError:
+        raise ValueError(f"unknown backend {backend!r}") from None
+    return spec.factory(url)
