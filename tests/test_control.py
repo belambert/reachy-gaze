@@ -138,7 +138,7 @@ class TestBackendSelection:
 
     def test_the_options_are_listed_for_the_panel(self):
         listed = {b["key"] for b in State().snapshot()["backends"]}
-        assert {"triton", "builtin"} <= listed
+        assert {"triton", "builtin", "vlm"} <= listed
 
     def test_config_accepts_a_known_backend(self):
         from tracker.main import Config

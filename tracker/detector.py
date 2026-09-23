@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import io
+import json
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
@@ -260,6 +262,160 @@ class BuiltinDetector(_JpegDetector):
         ]
 
 
+class VlmDetector(_JpegDetector):
+    """Detector backed by a vLLM server running a vision-language model.
+
+    Open-vocabulary: the requested labels go into the prompt and the model is
+    asked for boxes as JSON, which is parsed out of whatever prose or code
+    fences it wraps them in. Coordinates are read as [0, 1000] normalised (the
+    Qwen grounding convention) and mapped to the source frame, so the sent JPEG
+    can be downscaled freely. The model id is discovered from /v1/models, so the
+    URL is just the server, e.g. http://spark-10cf:8000.
+
+    A VLM is far slower than a detector network, so this is a frame every second
+    or two, not a stream; the timeout is correspondingly generous.
+    """
+
+    GRID = 1000.0  # coordinate space the model is asked to answer in
+
+    def __init__(
+        self,
+        url: str,
+        width: int = 640,
+        quality: int = 75,
+        timeout: float = 20.0,
+    ) -> None:
+        """Point the detector at a vLLM server, e.g. http://spark-10cf:8000."""
+        super().__init__(width, quality, timeout)
+        self.url = url.rstrip("/").removesuffix("/v1")
+        self._session = requests.Session()
+        self._model: str | None = None
+
+    def classes(self) -> list[str]:
+        """Reachability probe; the model is open-vocabulary, so report COCO.
+
+        Any label works in the prompt; returning COCO keeps the startup
+        vocabulary check from warning about the labels this app tracks, which
+        are all COCO classes.
+
+        Raises:
+            DetectorUnavailable: If the server cannot be reached or serves no
+                model.
+
+        """
+        self._discover()
+        return list(COCO_CLASSES)
+
+    def detect(
+        self, frame: npt.NDArray[np.uint8], labels: list[str], conf: float
+    ) -> list[Detection]:
+        """Prompt the model for boxes and return them, in source-frame pixels."""
+        model = self._discover()
+        jpeg, _ = self._encode(frame)
+        height, width = frame.shape[:2]
+        data_url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+        body = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                        {"type": "text", "text": self._prompt(labels)},
+                    ],
+                }
+            ],
+            "temperature": 0.0,
+            "max_tokens": 1024,
+        }
+        try:
+            resp = self._session.post(
+                f"{self.url}/v1/chat/completions", json=body, timeout=self.timeout
+            )
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"]
+        except requests.RequestException as e:
+            raise DetectorUnavailable(f"{self.url}: {e}") from e
+        except (KeyError, IndexError, ValueError) as e:
+            raise DetectorUnavailable(f"{self.url}: bad response") from e
+
+        return self._parse(text, labels, conf, width, height)
+
+    def _discover(self) -> str:
+        """The first model id the server reports, cached; also the reach probe."""
+        if self._model is None:
+            try:
+                resp = self._session.get(f"{self.url}/v1/models", timeout=self.timeout)
+                resp.raise_for_status()
+                self._model = resp.json()["data"][0]["id"]
+            except requests.RequestException as e:
+                raise DetectorUnavailable(f"{self.url}: {e}") from e
+            except (KeyError, IndexError, ValueError) as e:
+                raise DetectorUnavailable(f"{self.url}: no model served") from e
+        return self._model
+
+    @staticmethod
+    def _prompt(labels: list[str]) -> str:
+        """Ask for boxes as a bare JSON array in a fixed, parseable shape."""
+        wanted = ", ".join(labels)
+        return (
+            f"Find every instance of: {wanted}. "
+            "Respond with ONLY a JSON array and no other text. Each element is "
+            '{"label": <one of the requested names>, "box": [x1, y1, x2, y2], '
+            '"confidence": <0 to 1>}. Coordinates are integers from 0 to 1000, '
+            "normalised to image width (x) and height (y), top-left origin. "
+            "Return [] if there are none."
+        )
+
+    def _parse(
+        self, text: str, labels: list[str], conf: float, width: int, height: int
+    ) -> list[Detection]:
+        """Pull boxes from the model's reply, scaled to source pixels."""
+        wanted = {label.lower() for label in labels}
+        try:
+            items = json.loads(_json_array(text))
+        except (ValueError, TypeError):
+            return []
+
+        dets = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label", "")).lower()
+            # models vary on the key; bbox_2d is what Qwen returns
+            box = item.get("box") or item.get("bbox") or item.get("bbox_2d")
+            if label not in wanted or not _is_box(box):
+                continue
+            # the model rarely scores its boxes, so an unscored one is kept
+            score = float(item.get("confidence", 1.0))
+            if score < conf:
+                continue
+            x1, y1, x2, y2 = (float(c) for c in box)
+            dets.append(
+                Detection(
+                    label=label,
+                    conf=score,
+                    box=(
+                        x1 / self.GRID * width,
+                        y1 / self.GRID * height,
+                        x2 / self.GRID * width,
+                        y2 / self.GRID * height,
+                    ),
+                )
+            )
+        return dets
+
+
+def _json_array(text: str) -> str:
+    """The outermost [...] in `text`, ignoring prose or code fences around it."""
+    start, end = text.find("["), text.rfind("]")
+    return text[start : end + 1] if 0 <= start < end else "[]"
+
+
+def _is_box(box: object) -> bool:
+    return isinstance(box, (list, tuple)) and len(box) == 4
+
+
 # --- Backends ----------------------------------------------------------------
 #
 # The registry the app selects between. Add a backend by writing its Detector
@@ -283,6 +439,7 @@ BACKENDS: dict[str, Backend] = {
     "builtin": Backend(
         "builtin", "Built-in server", "http://10.0.0.206:8100", BuiltinDetector
     ),
+    "vlm": Backend("vlm", "VLM (vLLM)", "http://spark-10cf:8000", VlmDetector),
 }
 
 

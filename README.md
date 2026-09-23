@@ -237,16 +237,19 @@ frame coordinates for a head that doesn't dither on detector noise.
 
 `tracker/detector.py` defines a `Detector` protocol — `classes()` and
 `detect(frame, labels, conf)` — and the backends that implement it:
-`TritonDetector` (the vision-server's `tracker` ensemble over gRPC) and
-`BuiltinDetector` (the built-in FastAPI server over HTTP). Both send a JPEG, the
-labels to keep, and a confidence threshold.
+
+- **`TritonDetector`** — the vision-server's `tracker` ensemble over gRPC.
+- **`BuiltinDetector`** — the built-in FastAPI server over HTTP.
+- **`VlmDetector`** — a vLLM server running a vision-language model, prompted for
+  boxes. Open-vocabulary: the labels go into the prompt, and boxes come back as
+  JSON read as `[0, 1000]`-normalised coordinates (the Qwen grounding
+  convention). Far slower than a detector network, so it updates every second or
+  two rather than streaming.
 
 Backends are registered in the `BACKENDS` table at the bottom of that file, and
 the control panel selects between them — `snapshot()` reports the list. **To add
 one:** write a class satisfying the protocol and add a line to `BACKENDS` giving
-its key, label, default address, and constructor. An on-device backend, or an
-open-vocabulary model that takes free-text prompts instead of a fixed 80
-classes, only has to satisfy the protocol.
+its key, label, default address, and constructor.
 
 ## Development
 

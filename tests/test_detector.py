@@ -16,6 +16,7 @@ from tracker.detector import (
     BuiltinDetector,
     DetectorUnavailable,
     TritonDetector,
+    VlmDetector,
     make_detector,
 )
 
@@ -236,12 +237,113 @@ def test_builtin_classes_raises_when_server_is_down():
         BuiltinDetector("http://127.0.0.1:1", timeout=0.3).classes()
 
 
+# --- VLM backend, over a fake OpenAI-compatible server -----------------------
+
+# The model's reply text and the ids it lists; the last request body lands in
+# `vlm_seen` so tests can assert on what was asked.
+vlm_reply: dict = {}
+vlm_seen: dict = {}
+
+
+class VlmStub(BaseHTTPRequestHandler):
+    def do_GET(self):
+        ids = vlm_reply.get("models", ["served-model"])
+        self._send({"object": "list", "data": [{"id": i} for i in ids]})
+
+    def do_POST(self):
+        vlm_seen["body"] = json.loads(
+            self.rfile.read(int(self.headers["Content-Length"]))
+        )
+        content = vlm_reply.get("content", "[]")
+        self._send({"choices": [{"message": {"content": content}}]})
+
+    def _send(self, payload):
+        raw = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def vlm_server():
+    vlm_reply.clear()
+    vlm_seen.clear()
+    httpd = HTTPServer(("127.0.0.1", 0), VlmStub)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+
+
+def test_vlm_maps_normalised_boxes_to_source_pixels(vlm_server, frame):
+    # frame is 640x480; [0,1000] maps 500->320 in x and 1000->480 in y.
+    vlm_reply["content"] = '[{"label": "cat", "box": [0, 0, 500, 1000]}]'
+    det = VlmDetector(vlm_server).detect(frame, ["cat"], 0.4)[0]
+    assert det.box == pytest.approx((0, 0, 320, 480))
+    assert det.label == "cat"
+
+
+def test_vlm_reads_fenced_json_and_bbox_2d(vlm_server, frame):
+    vlm_reply["content"] = (
+        '```json\n[{"bbox_2d": [0, 0, 1000, 1000], "label": "dog"}]\n```'
+    )
+    det = VlmDetector(vlm_server).detect(frame, ["dog"], 0.4)[0]
+    assert det.box == pytest.approx((0, 0, 640, 480))
+
+
+def test_vlm_keeps_only_requested_labels(vlm_server, frame):
+    vlm_reply["content"] = (
+        '[{"label": "cat", "box": [0,0,100,100]},'
+        ' {"label": "sofa", "box": [0,0,100,100]}]'
+    )
+    dets = VlmDetector(vlm_server).detect(frame, ["cat"], 0.4)
+    assert [d.label for d in dets] == ["cat"]
+
+
+def test_vlm_applies_the_confidence_threshold(vlm_server, frame):
+    # a scored box below the threshold drops; an unscored one is kept.
+    vlm_reply["content"] = (
+        '[{"label": "cat", "box": [0,0,100,100], "confidence": 0.2},'
+        ' {"label": "cat", "box": [0,0,100,100]}]'
+    )
+    dets = VlmDetector(vlm_server).detect(frame, ["cat"], 0.4)
+    assert [d.conf for d in dets] == [1.0]
+
+
+def test_vlm_prompts_the_discovered_model(vlm_server, frame):
+    vlm_reply["models"] = ["Qwen/Qwen3.5-0.8B", "alias"]
+    VlmDetector(vlm_server).detect(frame, ["cat"], 0.4)
+    assert vlm_seen["body"]["model"] == "Qwen/Qwen3.5-0.8B"
+    content = vlm_seen["body"]["messages"][0]["content"]
+    assert any(part["type"] == "image_url" for part in content)
+    assert "cat" in next(p["text"] for p in content if p["type"] == "text")
+
+
+def test_vlm_junk_reply_yields_no_detections(vlm_server, frame):
+    vlm_reply["content"] = "I could not find anything in this image."
+    assert VlmDetector(vlm_server).detect(frame, ["cat"], 0.4) == []
+
+
+def test_vlm_unreachable_server_raises(frame):
+    with pytest.raises(DetectorUnavailable):
+        VlmDetector("http://127.0.0.1:1", timeout=0.3).detect(frame, ["cat"], 0.4)
+
+
+def test_vlm_url_tolerates_a_trailing_v1(vlm_server):
+    assert VlmDetector(vlm_server + "/v1").classes() == list(COCO_CLASSES)
+
+
 # --- Backend registry --------------------------------------------------------
 
 
 def test_make_detector_builds_each_backend():
     assert isinstance(make_detector("triton", "spark:8101"), TritonDetector)
     assert isinstance(make_detector("builtin", "http://x:8100"), BuiltinDetector)
+    assert isinstance(make_detector("vlm", "http://x:8000"), VlmDetector)
 
 
 def test_make_detector_rejects_an_unknown_backend():
