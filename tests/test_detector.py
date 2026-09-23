@@ -323,8 +323,33 @@ def test_vlm_prompts_the_discovered_model(vlm_server, frame):
     assert "cat" in next(p["text"] for p in content if p["type"] == "text")
 
 
+def test_vlm_constrains_decoding_to_a_label_schema(vlm_server, frame):
+    VlmDetector(vlm_server).detect(frame, ["cat", "dog"], 0.4)
+    fmt = vlm_seen["body"]["response_format"]
+    assert fmt["type"] == "json_schema"
+    props = fmt["json_schema"]["schema"]["items"]["properties"]
+    assert props["label"]["enum"] == ["cat", "dog"]
+    assert props["box"]["minItems"] == 4
+
+
 def test_vlm_junk_reply_yields_no_detections(vlm_server, frame):
     vlm_reply["content"] = "I could not find anything in this image."
+    assert VlmDetector(vlm_server).detect(frame, ["cat"], 0.4) == []
+
+
+def test_vlm_ignores_reasoning_prose_around_the_json(vlm_server, frame):
+    # A reasoning model narrates first, with bracketed numbers in the prose that
+    # a naive first-[/last-] scan would swallow; the fenced answer must win.
+    vlm_reply["content"] = (
+        "Let me look. Candidate person at [12, 34, 56, 78]. Final answer:\n"
+        '```json\n[{"bbox_2d": [0, 0, 1000, 1000], "label": "cat"}]\n```'
+    )
+    det = VlmDetector(vlm_server).detect(frame, ["cat"], 0.4)[0]
+    assert det.box == pytest.approx((0, 0, 640, 480))
+
+
+def test_vlm_reasoning_then_empty_list(vlm_server, frame):
+    vlm_reply["content"] = "There are no cats here, so the list is empty.\n\n[]"
     assert VlmDetector(vlm_server).detect(frame, ["cat"], 0.4) == []
 
 

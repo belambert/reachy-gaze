@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
@@ -283,7 +284,7 @@ class VlmDetector(_JpegDetector):
         url: str,
         width: int = 640,
         quality: int = 75,
-        timeout: float = 20.0,
+        timeout: float = 30.0,
     ) -> None:
         """Point the detector at a vLLM server, e.g. http://spark-10cf:8000."""
         super().__init__(width, quality, timeout)
@@ -327,6 +328,13 @@ class VlmDetector(_JpegDetector):
             ],
             "temperature": 0.0,
             "max_tokens": 1024,
+            # constrained decoding: the model can only emit schema-valid JSON,
+            # which skips the reasoning prose a thinking model would otherwise
+            # write first -- faster, and no fences or narration to parse around.
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "detections", "schema": self._schema(labels)},
+            },
         }
         try:
             resp = self._session.post(
@@ -356,16 +364,35 @@ class VlmDetector(_JpegDetector):
 
     @staticmethod
     def _prompt(labels: list[str]) -> str:
-        """Ask for boxes as a bare JSON array in a fixed, parseable shape."""
+        """Describe the task; the schema (see `_schema`) fixes the JSON shape."""
         wanted = ", ".join(labels)
         return (
-            f"Find every instance of: {wanted}. "
-            "Respond with ONLY a JSON array and no other text. Each element is "
-            '{"label": <one of the requested names>, "box": [x1, y1, x2, y2], '
-            '"confidence": <0 to 1>}. Coordinates are integers from 0 to 1000, '
-            "normalised to image width (x) and height (y), top-left origin. "
-            "Return [] if there are none."
+            f"Find every instance of: {wanted}. Give each one's bounding box as "
+            "integer coordinates from 0 to 1000, normalised to image width (x) "
+            "and height (y), with a top-left origin. Return an empty array if "
+            "there are none."
         )
+
+    @staticmethod
+    def _schema(labels: list[str]) -> dict:
+        """A JSON schema the server constrains generation to (vLLM/OpenAI)."""
+        return {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string", "enum": list(labels)},
+                    "box": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "minItems": 4,
+                        "maxItems": 4,
+                    },
+                },
+                "required": ["label", "box"],
+                "additionalProperties": False,
+            },
+        }
 
     def _parse(
         self, text: str, labels: list[str], conf: float, width: int, height: int
@@ -407,9 +434,17 @@ class VlmDetector(_JpegDetector):
 
 
 def _json_array(text: str) -> str:
-    """The outermost [...] in `text`, ignoring prose or code fences around it."""
-    start, end = text.find("["), text.rfind("]")
-    return text[start : end + 1] if 0 <= start < end else "[]"
+    """Best-effort JSON array from a model reply, tolerating prose and fences.
+
+    A reasoning model narrates before its answer, sometimes with bracketed
+    numbers in the prose, and wraps the real array in a ``` fence. So prefer the
+    last fenced block, then take the widest [...] span in whatever is left; a
+    naive first-[ to last-] over the whole reply would swallow the prose.
+    """
+    fences = re.findall(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    body = fences[-1] if fences else text
+    start, end = body.find("["), body.rfind("]")
+    return body[start : end + 1] if 0 <= start < end else "[]"
 
 
 def _is_box(box: object) -> bool:

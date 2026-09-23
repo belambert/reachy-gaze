@@ -242,9 +242,11 @@ frame coordinates for a head that doesn't dither on detector noise.
 - **`BuiltinDetector`** — the built-in FastAPI server over HTTP.
 - **`VlmDetector`** — a vLLM server running a vision-language model, prompted for
   boxes. Open-vocabulary: the labels go into the prompt, and boxes come back as
-  JSON read as `[0, 1000]`-normalised coordinates (the Qwen grounding
-  convention). Far slower than a detector network, so it updates every second or
-  two rather than streaming.
+  `[0, 1000]`-normalised coordinates (the Qwen grounding convention). Decoding is
+  constrained to a JSON schema (`response_format`), so the reply is schema-valid
+  JSON with labels from the requested set — no reasoning prose to parse around,
+  and faster than letting a thinking model narrate first. Still far slower than a
+  detector network: a frame every second or few, not a stream.
 
 Backends are registered in the `BACKENDS` table at the bottom of that file, and
 the control panel selects between them — `snapshot()` reports the list. **To add
