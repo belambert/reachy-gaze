@@ -58,10 +58,9 @@ run backwards: once on the cat, a person cannot take it back.
 When detections stop, the head keeps its aim on the last known position for
 `LOST_AFTER` seconds before it starts scanning the room — 60° either side of
 centre, with the head held level — so a subject that steps behind something is
-still
-being watched when it reappears. The panel distinguishes the
-two: **locked** while sightings are arriving, **holding** with the age of the
-last one while the head waits it out.
+still being watched when it reappears. The panel distinguishes the two:
+**locked** while sightings are arriving, **holding** with the age of the last
+one while the head waits it out.
 
 ## Running it
 
