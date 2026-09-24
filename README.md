@@ -180,9 +180,9 @@ Constants live at the top of `tracker/main.py`:
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
-| `STALE_AFTER`    | 1.0     | Seconds before the panel calls a lock held rather than live |
+| `STALE_AFTER`    | 5.0     | Seconds before the panel calls a lock held rather than live |
 | `SCAN_DEGREES`   | 60.0    | Half-width of the scan                                    |
-| `SCAN_HZ`        | 0.08    | Scan rate                                                 |
+| `SCAN_HZ`        | 0.04    | Scan rate                                                 |
 
 ### The scan
 
