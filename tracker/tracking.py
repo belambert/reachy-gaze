@@ -7,6 +7,9 @@ smooth its center before it reaches the control loop.
 
 from __future__ import annotations
 
+import time
+from typing import Callable
+
 import numpy as np
 import numpy.typing as npt
 from scipy.spatial.transform import Rotation
@@ -106,6 +109,11 @@ class TargetSelector:
     seen for `upgrade_after` frames running to do that, so a detection
     flickering at the confidence threshold cannot bounce the head between two
     subjects.
+
+    `max_lock` is the boredom timer: hold one target that long and the lock is
+    dropped so the scan can look for others. For `look_away` seconds after that,
+    a detection near where the abandoned one sat is passed over, so the head
+    turns to something else rather than snapping straight back.
     """
 
     def __init__(
@@ -115,6 +123,10 @@ class TargetSelector:
         max_jump: float = 0.5,
         max_misses: int = 12,
         upgrade_after: int = 3,
+        max_lock: float | None = None,
+        look_away: float = 4.0,
+        avoid_radius: float = 0.35,
+        time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         """Create a selector with the given preference and association gates."""
         self._priority = list(priority or [])
@@ -122,24 +134,50 @@ class TargetSelector:
         self._max_jump = max_jump
         self._max_misses = max_misses
         self._upgrade_after = upgrade_after
+        self._max_lock = max_lock
+        self._look_away = look_away
+        self._avoid_radius = avoid_radius
+        self._time = time_fn
         self._center: tuple[float, float] | None = None
         self._label: str | None = None
         self._misses = 0
         self._better = 0
+        self._locked_at: float | None = None
+        self._avoid: tuple[float, float] | None = None
+        self._avoid_until = 0.0
 
     def select(
         self, dets: list[Detection], width: int, height: int
     ) -> Detection | None:
         """Pick the detection to aim at, or None when none is plausible."""
+        now = self._time()
+
+        # Bored of a target held too long: drop it and steer clear of it for a
+        # moment, so the scan turns up something else instead of re-grabbing it.
+        if (
+            self._max_lock is not None
+            and self._locked_at is not None
+            and now - self._locked_at >= self._max_lock
+        ):
+            self._avoid, self._avoid_until = self._center, now + self._look_away
+            self._center = self._label = self._locked_at = None
+
         if not dets:
             self._miss()
             return None
+
+        if self._avoid is not None and now < self._avoid_until:
+            dets = [d for d in dets if self._far_from_avoided(d, width, height)]
+            if not dets:
+                self._miss()
+                return None
 
         best = min(self._rank(det.label) for det in dets)
         self._better = self._better + 1 if best < self._rank(self._label) else 0
         wanted = [det for det in dets if self._rank(det.label) == best]
 
-        if self._center is None or self._better >= self._upgrade_after:
+        acquiring = self._center is None or self._better >= self._upgrade_after
+        if acquiring:
             det = max(wanted, key=lambda d: d.area)
             if det.area < self._min_area_frac * width * height:
                 self._miss()
@@ -153,11 +191,20 @@ class TargetSelector:
                 self._miss()
                 return None
 
+        if acquiring:  # a fresh lock restarts the boredom timer and ends look-away
+            self._locked_at = now
+            self._avoid = None
         self._center = norm_center(det, width, height)
         self._label = det.label
         self._misses = 0
         self._better = 0
         return det
+
+    def _far_from_avoided(self, det: Detection, width: int, height: int) -> bool:
+        assert self._avoid is not None
+        return (
+            _dist2(norm_center(det, width, height), self._avoid) > self._avoid_radius**2
+        )
 
     def _rank(self, label: str | None) -> int:
         """Lower is preferred; anything unlisted comes last."""
@@ -177,6 +224,11 @@ class TargetSelector:
         return self._center is not None
 
     @property
+    def looking_away(self) -> bool:
+        """Whether we just dropped a target out of boredom and are avoiding it."""
+        return self._avoid is not None and self._time() < self._avoid_until
+
+    @property
     def label(self) -> str | None:
         """Class of the current target, if there is one."""
         return self._label
@@ -187,6 +239,8 @@ class TargetSelector:
         self._label = None
         self._misses = 0
         self._better = 0
+        self._locked_at = None
+        self._avoid = None
 
 
 class CenterFilter:

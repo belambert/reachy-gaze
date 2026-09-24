@@ -55,6 +55,13 @@ subjects, and the minimum-area gate still applies — a stray speck of cat will
 not pull the head off a person standing right there. The preference does not
 run backwards: once on the cat, a person cannot take it back.
 
+It also does not fixate forever. After `LOCK_TIMEOUT` seconds on one target the
+lock is dropped and the head starts scanning again to see what else is around;
+for `LOOK_AWAY` seconds afterwards a detection sitting where the abandoned one
+was is passed over, so the head turns to another subject rather than snapping
+straight back. When nothing else turns up, that same target is re-acquired once
+the look-away window lapses.
+
 When detections stop, the head keeps its aim on the last known position for
 `LOST_AFTER` seconds before it starts scanning the room — 60° either side of
 centre, with the head held level — so a subject that steps behind something is
@@ -180,6 +187,8 @@ Constants live at the top of `tracker/main.py`:
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
+| `LOCK_TIMEOUT`   | 15.0    | Seconds on one target before breaking off to scan for others |
+| `LOOK_AWAY`      | 4.0     | Seconds steering clear of the abandoned target while scanning |
 | `STALE_AFTER`    | 5.0     | Seconds before the panel calls a lock held rather than live |
 | `SCAN_DEGREES`   | 60.0    | Half-width of the scan                                    |
 | `SCAN_HZ`        | 0.04    | Scan rate                                                 |

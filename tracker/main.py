@@ -45,6 +45,8 @@ BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 SCAN_DEGREES = 60.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
+LOCK_TIMEOUT = 15.0  # seconds on one target before breaking off to scan for others
+LOOK_AWAY = 4.0  # seconds steering clear of the abandoned target while scanning
 STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
@@ -96,7 +98,7 @@ class State:
         self.pull = MAX_HEAD_PULL
 
         self.goal: Rotation | None = None
-        self.head_pose = np.eye(4) # rotation & position
+        self.head_pose = np.eye(4)  # rotation & position
         self.last_seen = 0.0
         self.detector_ok = False
         self.error = ""
@@ -257,7 +259,9 @@ class Tracker(ReachyMiniApp):
         K, D = camera.K, camera.D
         T_head_cam = getattr(mini, "T_head_cam", None)
 
-        selector = TargetSelector(TRACK_LABELS)
+        selector = TargetSelector(
+            TRACK_LABELS, max_lock=LOCK_TIMEOUT, look_away=LOOK_AWAY
+        )
         smoother = CenterFilter()
         detector: Detector | None = None
         detector_key: tuple[str, str] | None = None
@@ -324,6 +328,12 @@ class Tracker(ReachyMiniApp):
                     state.last_seen = time.monotonic()
                     state.center = center
                     state.label = det.label
+                elif selector.looking_away:
+                    # Bored of the last target: drop the aim now so the head
+                    # scans, rather than holding it for the whole LOST_AFTER grace.
+                    state.goal = None
+                    state.center = None
+                    state.label = ""
 
             elapsed = time.monotonic() - started
             if elapsed < period:

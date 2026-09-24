@@ -9,6 +9,7 @@ from tracker.tracking import (
     CenterFilter,
     PoseSmoother,
     TargetSelector,
+    _dist2,
     norm_center,
     pixel_center,
     pose_matrix,
@@ -61,6 +62,90 @@ class TestSelector:
         sel.select([box(320, 240, size=150)], W, H)
         for _ in range(3):
             sel.select([], W, H)
+        assert sel.has_target
+
+
+class Clock:
+    """A hand-advanced stand-in for time.monotonic."""
+
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+class TestBoredom:
+    """Holding one target too long must break the lock so the head scans again."""
+
+    def selector(self, clock, **kw):
+        return TargetSelector(max_lock=10.0, look_away=4.0, time_fn=clock, **kw)
+
+    def test_no_max_lock_holds_the_lock_forever(self):
+        # The default (no boredom timer) must not change: it stays locked.
+        sel = TargetSelector()
+        sel.select([box(320, 240, size=150)], W, H)
+        for _ in range(1000):
+            sel.select([box(320, 240, size=150)], W, H)
+        assert sel.has_target
+
+    def test_keeps_the_lock_until_the_timer_expires(self):
+        clock = Clock()
+        sel = self.selector(clock)
+        cat = box(320, 240, size=150)
+        sel.select([cat], W, H)
+
+        clock.t = 9.9
+        assert sel.select([cat], W, H) is cat
+        assert sel.has_target and not sel.looking_away
+
+    def test_drops_the_lock_once_bored(self):
+        clock = Clock()
+        sel = self.selector(clock)
+        cat = box(320, 240, size=150)
+        sel.select([cat], W, H)
+
+        clock.t = 10.0
+        assert sel.select([cat], W, H) is None, "the sole target is passed over"
+        assert not sel.has_target and sel.looking_away
+
+    def test_looks_at_a_different_object_when_bored(self):
+        clock = Clock()
+        sel = self.selector(clock)
+        here, there = box(100, 240, size=150), box(560, 240, size=150)
+        sel.select([here, there], W, H)
+        assert sel._center is not None
+
+        was = sel._center
+        clock.t = 10.0
+        picked = sel.select([here, there], W, H)
+        assert picked is not None
+        # Boredom must swing the lock clear of where it had been sitting.
+        assert _dist2(norm_center(picked, W, H), was) > 0.35**2
+
+    def test_returns_to_the_only_target_after_looking_away(self):
+        clock = Clock()
+        sel = self.selector(clock)
+        cat = box(320, 240, size=150)
+        sel.select([cat], W, H)
+
+        clock.t = 10.0
+        assert sel.select([cat], W, H) is None  # bored, looking away
+
+        clock.t = 14.0  # look-away window has elapsed
+        assert sel.select([cat], W, H) is cat, "comes back when nothing else turns up"
+        assert not sel.looking_away
+
+    def test_the_timer_restarts_on_the_new_target(self):
+        clock = Clock()
+        sel = self.selector(clock)
+        here, there = box(100, 240, size=150), box(560, 240, size=150)
+        sel.select([here, there], W, H)
+
+        clock.t = 10.0
+        sel.select([here, there], W, H)  # swings to the other object
+        clock.t = 15.0  # 5s on the new one: not yet bored again
+        assert sel.select([here, there], W, H) is not None
         assert sel.has_target
 
 
