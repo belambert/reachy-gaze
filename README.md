@@ -57,10 +57,10 @@ run backwards: once on the cat, a person cannot take it back.
 
 When detections stop, the head keeps its aim on the last known position for
 `LOST_AFTER` seconds before it starts scanning the room — 60° either side of
-centre, and up and down — so a subject that steps behind something is still
-being watched when it reappears. The panel distinguishes the
-two: **locked** while sightings are arriving, **holding** with the age of the
-last one while the head waits it out.
+centre, with the head held level — so a subject that steps behind something is
+still being watched when it reappears. The panel distinguishes the two:
+**locked** while sightings are arriving, **holding** with the age of the last
+one while the head waits it out.
 
 ## Running it
 
@@ -161,17 +161,16 @@ Constants live at the top of `tracker/main.py`:
 
 ### The scan
 
-Yaw and pitch each follow a sine at a different rate, so the head traces a
-pattern over the room rather than retracing one stripe across it — which is why
-`SCAN_PITCH_HZ` must not be a multiple of `SCAN_HZ`. One cycle takes 25 s and
-covers **120° of yaw and 36° of pitch**.
+The scan is a slow side-to-side sweep in yaw only; the head is held level, with
+no up-and-down motion. One cycle takes 25 s and covers **120° of yaw**.
 
 That is the front of the room only. The body's `yaw_body` joint would allow
 ±160°, so there is room to widen `SCAN_DEGREES`, but as it stands a subject that
 leaves to the side or behind has to come back into view on its own.
 
-Each scan is phase-aligned to the head's current pose, on both axes, so it picks
-up from wherever the head was holding instead of snapping to centre first.
+Each scan is phase-aligned to the head's current yaw, so it picks up from
+wherever the head was holding instead of snapping to centre first. Any pitch
+left over from tracking is eased back to level once by the follower.
 
 ### Why it never whips round
 
@@ -195,7 +194,7 @@ For comparison, over a full scan cycle starting from rest:
 
 | Motion                          | Peak speed | Peak acceleration |
 | ------------------------------- | ---------- | ----------------- |
-| Scan, 60° yaw and 18° pitch     | 19 °/s     | 84 °/s²           |
+| Scan, 60° yaw                   | 15 °/s     | 65 °/s²           |
 | Tracking a 40° step (pull 10)   | 26 °/s     | 318 °/s²          |
 
 The scan is gentler than ordinary tracking, so if it looks unsteady on hardware
