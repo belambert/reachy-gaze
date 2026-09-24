@@ -45,7 +45,7 @@ BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 SCAN_DEGREES = 60.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
-STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
+STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
 # Which detection backend to use, and where to reach it. Both are prefilled in
@@ -96,7 +96,7 @@ class State:
         self.pull = MAX_HEAD_PULL
 
         self.goal: Rotation | None = None
-        self.head_pose = np.eye(4)
+        self.head_pose = np.eye(4) # rotation & position
         self.last_seen = 0.0
         self.detector_ok = False
         self.error = ""
