@@ -44,9 +44,6 @@ BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 # of the robot, well inside that.
 SCAN_DEGREES = 60.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
-SCAN_PITCH_DEGREES = 18.0  # how far the scan looks up and down
-SCAN_PITCH_HZ = 0.11  # deliberately not a multiple of SCAN_HZ, so the two axes
-# trace a pattern over the room rather than retracing one line across it
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 STALE_AFTER = 1.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
@@ -178,7 +175,7 @@ class Tracker(ReachyMiniApp):
         perk = 0.0
         was_scanning = False
         scan_t0 = 0.0
-        scan_phase = (0.0, 0.0)
+        scan_phase = 0.0
         t0 = time.monotonic()
         last = t0
         next_tick = t0
@@ -353,29 +350,22 @@ class Tracker(ReachyMiniApp):
             logger.info("%s detects all of %s", where, ", ".join(TRACK_LABELS))
 
     @staticmethod
-    def _scan_pose(t: float, phase: tuple[float, float] = (0.0, 0.0)) -> Rotation:
-        """A slow look around and up and down, to find a target again.
+    def _scan_pose(t: float, phase: float = 0.0) -> Rotation:
+        """A slow, level look from side to side, to find a target again.
 
         `t` is seconds since this scan began, not since the app started: the
-        phases are chosen per scan so it picks up from the head's current pose.
+        phase is chosen per scan so it picks up from the head's current yaw.
+        The head is held level; a pitch left over from tracking is eased out
+        once by the follower rather than swept up and down.
         """
-        yaw_phase, pitch_phase = phase
-        yaw = SCAN_DEGREES * math.sin(2 * math.pi * SCAN_HZ * t + yaw_phase)
-        pitch = SCAN_PITCH_DEGREES * math.sin(
-            2 * math.pi * SCAN_PITCH_HZ * t + pitch_phase
-        )
-        # Intrinsic: pitch about the head's own axis after it has turned, not
-        # about a fixed one, which past 90 degrees of yaw is a different motion.
-        return Rotation.from_euler("ZY", [yaw, pitch], degrees=True)
+        yaw = SCAN_DEGREES * math.sin(2 * math.pi * SCAN_HZ * t + phase)
+        return Rotation.from_euler("Z", yaw, degrees=True)
 
     @staticmethod
-    def _scan_phase(rotation: Rotation) -> tuple[float, float]:
-        """The scan phases whose starting pose matches `rotation`."""
-        yaw, pitch, _ = rotation.as_euler("ZYX", degrees=True)
-        return (
-            Tracker._phase_at(yaw, SCAN_DEGREES),
-            Tracker._phase_at(pitch, SCAN_PITCH_DEGREES),
-        )
+    def _scan_phase(rotation: Rotation) -> float:
+        """The scan phase whose starting yaw matches `rotation`."""
+        yaw, _, _ = rotation.as_euler("ZYX", degrees=True)
+        return Tracker._phase_at(yaw, SCAN_DEGREES)
 
     @staticmethod
     def _phase_at(angle: float, amplitude: float) -> float:
