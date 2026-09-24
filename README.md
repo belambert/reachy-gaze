@@ -64,16 +64,25 @@ one while the head waits it out.
 
 ## Running it
 
-### 1. Start the detector
+### 1. Start a detector
 
-The robot talks to the **vision-server**, a Triton Inference Server that takes a
-JPEG and returns boxes. Set it up on the Spark from its own repo; the short
-version is:
+There are three detection backends, and you need one of them running somewhere
+the robot can reach. The control panel picks between them.
+
+| Backend                     | Address            | Speed               | Labels          |
+| --------------------------- | ------------------ | ------------------- | --------------- |
+| **Triton** (`triton`)       | `host:8101` (gRPC) | Full `DETECT_HZ`    | COCO-80         |
+| **Built-in** (`builtin`)    | `http://host:8100` | Full, on a LAN      | COCO-80         |
+| **VLM** (`vlm`)             | `http://host:8000` | A frame every 1–2 s | Any (prompted)  |
+
+**Triton** is the default and the fastest. The **vision-server** is a Triton
+Inference Server that takes a JPEG and returns boxes. Set it up on the Spark
+from its own repo; the short version is:
 
     scripts/build_engine.sh    # one-off, builds the TensorRT plan
     scripts/serve.sh           # serves gRPC on 8101 (and HTTP 8100, metrics 8102)
 
-Note the Spark's address — the robot reaches it over wifi. Check it is up:
+Check it is up:
 
     curl -sf <spark>:8100/v2/health/ready && echo READY || echo "NOT READY"
 
@@ -81,18 +90,32 @@ The client uses **gRPC on 8101**, not HTTP JSON on 8100: JSON spends a decimal
 number per JPEG byte and inflates each frame ~4.6x, enough to blow the wifi
 budget at 12 Hz. HTTP 8100 is for probing by hand.
 
-The bundled `tracker-server` (`uv sync --extra server`, then `tracker-server`)
-is a simpler FastAPI + Ultralytics detector for local use, but it speaks the old
-HTTP protocol the client no longer uses. See [Choosing a model](#choosing-a-model)
-for its model options.
+**Built-in** is the bundled FastAPI + Ultralytics server — no Triton or TensorRT
+needed, and happy on CPU, CUDA or Apple MPS, so it suits a laptop on the same
+LAN:
+
+    uv sync --extra server
+    uv run tracker-server              # serves on 0.0.0.0:8100
+    uv run tracker-server --model yolo11s.pt --port 8100
+
+See [Choosing a model](#choosing-a-model) for which model to pass.
+
+**VLM** prompts a vision-language model served by vLLM's OpenAI-compatible API
+for boxes. It is open-vocabulary, so `TRACK_LABELS` isn't limited to COCO, but
+it is far slower than a detector network. Serve a grounding-capable model (the
+Qwen-VL family's `[0, 1000]` box convention is what the client expects), e.g.:
+
+    vllm serve Qwen/Qwen2.5-VL-7B-Instruct --port 8000
+
+The address is just the server; the model id is discovered from `/v1/models`.
+See [Swapping the detector](#swapping-the-detector) for how each backend works.
 
 ### 2. Start the app, on the robot
 
 Install it as a Reachy Mini app, then open the control panel at
-<http://localhost:8042>. Pick the **Backend** — `Triton (vision-server)` or the
-`Built-in server` — and check its **Detector** address. Triton wants a bare
-`host:port` gRPC endpoint like `<spark>:8101`; the built-in server wants an
-`http://host:8100` URL. Switching backend fills in that backend's default
+<http://localhost:8042>. Pick the **Backend** — `Triton (vision-server)`,
+`Built-in server` or `VLM (vLLM)` — and check its **Detector** address, in the
+form the table above gives. Switching backend fills in that backend's default
 address, which you can then edit.
 
 Tracking is **on from the moment the app starts** — untick **Tracking enabled**
@@ -100,7 +123,9 @@ to stop it. That setting is not persisted, so a restart begins tracking again.
 
 The backend and address are prefilled from `DEFAULT_BACKEND` and
 `DEFAULT_SERVER_URL` in `tracker/main.py` (Triton on `spark-10cf:8101`). Set
-`TRACKER_BACKEND` and `TRACKER_SERVER_URL` to change them without editing code.
+`TRACKER_BACKEND` (`triton`, `builtin` or `vlm`) and `TRACKER_SERVER_URL` to
+change them without editing code; with only the backend set, the address
+defaults to that backend's.
 
 The panel shows whether the detector is reachable, the measured detection rate,
 and where in frame the tracker currently believes the target is.
