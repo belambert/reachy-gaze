@@ -64,7 +64,10 @@ def look_yaw_pitch(head_pose: np.ndarray) -> tuple[float, float]:
     """Head aim as (yaw, pitch) degrees: +yaw is left, +pitch is up, 0 is ahead.
 
     Reads the head's forward axis (the pose rotation's +X column, which the SDK
-    aims at the target) in the head frame, where +X is forward, +Y left, +Z up.
+    aims at the target) in the world frame, where +X is forward, +Y left, +Z up.
+    This is the absolute aim: `get_current_head_pose` is the forward kinematics
+    of all seven joints, body yaw included, so the turntable's contribution is
+    already in here — do not add body yaw again.
     """
     fwd = head_pose[:3, 0]
     yaw = math.degrees(math.atan2(fwd[1], fwd[0]))
