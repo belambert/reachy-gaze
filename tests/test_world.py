@@ -106,3 +106,45 @@ def test_directions_are_absolute_not_in_frame(world):
     assert obj["yaw"] == pytest.approx(-20.0)
     assert obj["pitch"] == pytest.approx(10.0)
     assert math.hypot(*obj["direction"]) == pytest.approx(1.0, abs=1e-3)
+
+
+def test_same_yaw_different_height_are_distinct_objects(world):
+    # One subject above another on the same bearing: a yaw alone would merge them.
+    world.observe([det("cat"), det("cat")], [toward(0, -30), toward(0, 30)])
+    assert len(world.objects()) == 2
+
+
+def test_observe_names_each_sighting_consistently(world):
+    first = world.observe([det("cat"), det("dog")], [toward(0), toward(40)])
+    again = world.observe([det("dog"), det("cat")], [toward(41), toward(1)])
+    assert again == first[::-1]
+
+
+class TestDwell:
+    def test_never_dwelt_by_default(self, world):
+        [id] = world.observe([det("cat")], [toward(0)])
+        assert not world.dwelt_within(id, 60.0)
+        assert world.snapshot()[0]["dwelt_ago"] is None
+
+    def test_dwelling_is_remembered_for_the_window(self, world, clock):
+        [id] = world.observe([det("cat")], [toward(0)])
+        world.dwell(id)
+
+        clock.t += 30.0
+        assert world.dwelt_within(id, 60.0)
+        assert world.snapshot()[0]["dwelt_ago"] == 30.0
+
+        clock.t += 30.1
+        assert not world.dwelt_within(id, 60.0)
+
+    def test_the_dwell_follows_the_object_as_it_moves(self, world):
+        [id] = world.observe([det("cat")], [toward(0)])
+        world.dwell(id)
+        [moved] = world.observe([det("cat")], [toward(10)])
+        assert moved == id and world.dwelt_within(id, 60.0)
+
+    def test_only_the_object_dwelt_on_is_marked(self, world):
+        cat, dog = world.observe([det("cat"), det("dog")], [toward(0), toward(40)])
+        world.dwell(cat)
+        assert world.dwelt_within(cat, 60.0)
+        assert not world.dwelt_within(dog, 60.0)

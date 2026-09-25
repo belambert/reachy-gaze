@@ -136,12 +136,14 @@ function bearing({ yaw, pitch }) {
     return words.join(" and ");
 }
 
-// The world model: everything seen lately, newest first, with its age.
+// The world model: everything seen lately, newest first, with its age and,
+// if the head has locked onto it, how long ago that was.
 function renderWorld(objects) {
     el("world").replaceChildren(
         ...objects.map((obj) => {
             const node = document.createElement("li");
-            node.textContent = `${emoji(obj.label)} ${obj.label}, ${bearing(obj)}, ${Math.round(obj.age)}s ago`;
+            const watched = obj.dwelt_ago == null ? "" : `, watched ${Math.round(obj.dwelt_ago)}s ago`;
+            node.textContent = `${emoji(obj.label)} ${obj.label}, ${bearing(obj)}, ${Math.round(obj.age)}s ago${watched}`;
             return node;
         }),
     );

@@ -47,10 +47,10 @@ SCAN_DEGREES = 90.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 LOCK_TIMEOUT = 15.0  # seconds on one target before breaking off to scan for others
-LOOK_AWAY = 10.0  # seconds steering clear of the abandoned target while scanning
 STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 FORGET_AFTER = 120.0  # seconds before an unseen object drops out of the world model
+DWELL_MEMORY = 60.0  # once bored, shun every object the head dwelt on this recently
 
 # Which detection backend to use, and where to reach it. Both are prefilled in
 # the control panel and overridable from the environment without editing code.
@@ -289,9 +289,7 @@ class Tracker(ReachyMiniApp):
         K, D = camera.K, camera.D
         T_head_cam = getattr(mini, "T_head_cam", None)
 
-        selector = TargetSelector(
-            TRACK_LABELS, max_lock=LOCK_TIMEOUT, look_away=LOOK_AWAY
-        )
+        selector = TargetSelector(TRACK_LABELS, max_lock=LOCK_TIMEOUT)
         smoother = CenterFilter()
         detector: Detector | None = None
         detector_key: tuple[str, str] | None = None
@@ -339,15 +337,19 @@ class Tracker(ReachyMiniApp):
                 continue
 
             height, width = frame.shape[:2]
-            # World direction of each box, so the selector can shun a target it
-            # tired of by where it is rather than by a pixel the scan moves.
+            # World direction of each box, so objects are remembered by where
+            # they are rather than by a pixel the head's turning moves.
             dirs = [self._direction(d, K, D, head_pose, T_head_cam) for d in dets]
-            det = selector.select(dets, width, height, dirs)
+            with state.lock:
+                ids = state.world.observe(dets, dirs)
+                shunned = [state.world.dwelt_within(i, DWELL_MEMORY) for i in ids]
+            det = selector.select(dets, width, height, shunned)
             if det is None and not selector.has_target:
                 smoother.reset()
 
             with state.lock:
-                state.world.observe(dets, dirs)
+                if det is not None:
+                    state.world.dwell(next(i for d, i in zip(dets, ids) if d is det))
                 state.lens = {
                     "fx": float(K[0, 0]),
                     "fy": float(K[1, 1]),
@@ -380,7 +382,7 @@ class Tracker(ReachyMiniApp):
                     state.last_seen = time.monotonic()
                     state.center = center
                     state.label = det.label
-                elif selector.looking_away:
+                elif selector.bored:
                     # Bored of the last target: drop the aim now so the head
                     # scans, rather than holding it for the whole LOST_AFTER grace.
                     state.goal = None

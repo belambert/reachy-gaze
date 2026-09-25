@@ -56,14 +56,16 @@ not pull the head off a person standing right there. The preference does not
 run backwards: once on the cat, a person cannot take it back.
 
 It also does not fixate forever. After `LOCK_TIMEOUT` seconds on one target the
-lock is dropped and the head starts scanning again to see what else is around;
-for `LOOK_AWAY` seconds afterwards the abandoned target is passed over. It is
-shunned by its **world direction**, not its position in frame, so the scanning
-head cannot slide the block off it — where a pixel-space avoid point would drift
-out of range in a frame or two and let the target be grabbed straight back. A
-full direction, not just a yaw, so two subjects on the same bearing at different
-heights stay distinct. When nothing else turns up, that same target is
-re-acquired once the window lapses.
+lock is dropped and the head starts scanning again to see what else is around.
+Until it locks onto something new, it passes over **everything it has dwelt on
+in the last `DWELL_MEMORY` seconds**, not just the target it tired of, so it
+doesn't bounce straight back to the cat it watched a minute ago. Which objects
+those are comes from the [world model](#the-world-model), which tracks them by
+world direction rather than position in frame, so the scanning head cannot
+slide the block off them. When nothing else turns up, each old target becomes
+fair game again once `DWELL_MEMORY` seconds have passed since it was last
+watched — so with a single subject in the room, the head scans for that long
+before coming back to it.
 
 When detections stop, the head keeps its aim on the last known position for
 `LOST_AFTER` seconds before it starts scanning the room — 60° either side of
@@ -76,13 +78,15 @@ one while the head waits it out.
 
 Alongside the one target it aims at, the robot keeps a short-term memory of
 everything it has seen lately (`tracker/world.py`). Each entry holds the
-object's type, its location, and when it was last seen. It keeps every box of
-every tracked class, not only the target.
+object's type, its location, when it was last seen, and when the head last
+dwelt on it (was locked onto it). It keeps every box of every tracked class, not
+only the target.
 
 The location is a **unit direction** in the world frame (+X forward, +Y left, +Z
 up), not a point in space: a single camera gives a bearing but no range. It is
-the same absolute direction the look-away logic uses, so an object stays put in
-memory while the head turns away from it.
+absolute, so an object stays put in memory while the head turns away from it. A
+full direction, not just a yaw, so two subjects on the same bearing at different
+heights stay distinct.
 
 Each frame, a sighting within 15° of a remembered object with the same label
 counts as that object. The object moves to the new direction and its age
@@ -93,8 +97,10 @@ head looks where it was and finds nothing, so something that has moved on
 lingers until it ages out.
 
 The panel lists the world under the aim readout, newest first, e.g. "🐱 cat, 30°
-left and 5° down, 4s ago". `/state` returns it as `world`, with each object's
-`id`, `label`, `direction`, `yaw`/`pitch` in degrees, and `age` in seconds.
+left and 5° down, 4s ago, watched 20s ago". `/state` returns it as `world`, with
+each object's `id`, `label`, `direction`, `yaw`/`pitch` in degrees, and `age`
+and `dwelt_ago` in seconds (`dwelt_ago` is null if it has never been the
+target).
 
 ## Running it
 
@@ -223,9 +229,9 @@ Constants live at the top of `tracker/main.py`:
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
 | `LOCK_TIMEOUT`   | 15.0    | Seconds on one target before breaking off to scan for others |
-| `LOOK_AWAY`      | 10.0    | Seconds steering clear of the abandoned target while scanning |
 | `STALE_AFTER`    | 5.0     | Seconds before the panel calls a lock held rather than live |
 | `FORGET_AFTER`   | 120.0   | Seconds before an unseen object leaves the world model    |
+| `DWELL_MEMORY`   | 60.0    | Seconds a watched object stays shunned once bored         |
 | `SCAN_DEGREES`   | 90.0    | Half-width of the scan                                    |
 | `SCAN_HZ`        | 0.04    | Scan rate                                                 |
 

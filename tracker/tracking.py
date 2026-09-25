@@ -7,7 +7,6 @@ smooth its center before it reaches the control loop.
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Callable
 
@@ -16,10 +15,6 @@ import numpy.typing as npt
 from scipy.spatial.transform import Rotation
 
 from tracker.detector import Detection
-
-# A unit direction in the world frame, used to avoid a bored-of target by where
-# it is rather than where it lands in frame.
-Vec3 = tuple[float, float, float]
 
 
 def norm_center(det: Detection, width: int, height: int) -> tuple[float, float]:
@@ -116,12 +111,12 @@ class TargetSelector:
     subjects.
 
     `max_lock` is the boredom timer: hold one target that long and the lock is
-    dropped so the scan can look for others. For `look_away` seconds after that,
-    the abandoned target is passed over — by its world direction, so the head
-    turning cannot slide the block off it — and the head turns to something else
-    rather than snapping straight back. Avoidance needs the per-detection
-    `directions` passed to `select`; without them the lock is still dropped, but
-    nothing is steered clear of.
+    dropped so the scan can look for others. It stays bored until it locks onto
+    something new, and meanwhile passes over any detection flagged in the
+    `shunned` mask given to `select`, so the head turns to something else rather
+    than snapping straight back. What to shun, and for how long, is the caller's
+    call (the world model's, in practice); without a mask the lock is still
+    dropped, but nothing is steered clear of.
     """
 
     def __init__(
@@ -132,8 +127,6 @@ class TargetSelector:
         max_misses: int = 12,
         upgrade_after: int = 3,
         max_lock: float | None = None,
-        look_away: float = 4.0,
-        avoid_angle: float = math.radians(20.0),
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         """Create a selector with the given preference and association gates."""
@@ -143,66 +136,44 @@ class TargetSelector:
         self._max_misses = max_misses
         self._upgrade_after = upgrade_after
         self._max_lock = max_lock
-        self._look_away = look_away
-        self._avoid_angle = avoid_angle
         self._time = time_fn
         self._center: tuple[float, float] | None = None
         self._label: str | None = None
         self._misses = 0
         self._better = 0
         self._locked_at: float | None = None
-        self._locked_dir: Vec3 | None = None
-        self._avoid_dir: Vec3 | None = None
-        self._avoid_until = 0.0
+        self._bored = False
 
     def select(
         self,
         dets: list[Detection],
         width: int,
         height: int,
-        directions: list[Vec3] | None = None,
+        shunned: list[bool] | None = None,
     ) -> Detection | None:
         """Pick the detection to aim at, or None when none is plausible.
 
-        `directions` is the world look direction (a unit vector) of each
-        detection, parallel to `dets`; it is only used to steer clear of a
-        target we grew bored of.
+        `shunned`, parallel to `dets`, flags detections to pass over while
+        bored of the last target.
         """
         now = self._time()
 
-        # Bored of a target held too long: drop it and steer clear of the
-        # direction it was in, so the scan turns up something else instead.
+        # Bored of a target held too long: drop it and shun what the caller
+        # says to, so the scan turns up something else instead.
         if (
             self._max_lock is not None
             and self._locked_at is not None
             and now - self._locked_at >= self._max_lock
         ):
-            self._avoid_dir, self._avoid_until = self._locked_dir, now + self._look_away
-            self._center = self._label = self._locked_at = self._locked_dir = None
+            self._bored = True
+            self._center = self._label = self._locked_at = None
+
+        if self._bored and shunned:
+            dets = [d for d, shun in zip(dets, shunned) if not shun]
 
         if not dets:
             self._miss()
             return None
-
-        if self._avoid_dir is not None and now < self._avoid_until and directions:
-            # Follow the abandoned target's direction as it moves, so it stays
-            # excluded for the whole window. World direction, not pixels: the
-            # head is scanning, so the image position slides while the direction
-            # barely does.
-            keep, keep_d, nearest_gap, nearest_dir = [], [], self._avoid_angle, None
-            for d, vec in zip(dets, directions):
-                gap = angle_between(vec, self._avoid_dir)
-                if gap > self._avoid_angle:
-                    keep.append(d)
-                    keep_d.append(vec)
-                elif gap <= nearest_gap:
-                    nearest_gap, nearest_dir = gap, vec
-            if nearest_dir is not None:
-                self._avoid_dir = nearest_dir
-            if not keep:
-                self._miss()
-                return None
-            dets, directions = keep, keep_d
 
         best = min(self._rank(det.label) for det in dets)
         self._better = self._better + 1 if best < self._rank(self._label) else 0
@@ -223,12 +194,11 @@ class TargetSelector:
                 self._miss()
                 return None
 
-        if acquiring:  # a fresh lock restarts the boredom timer and ends look-away
+        if acquiring:  # a fresh lock restarts the boredom timer and ends boredom
             self._locked_at = now
-            self._avoid_dir = None
+            self._bored = False
         self._center = norm_center(det, width, height)
         self._label = det.label
-        self._locked_dir = _direction_of(det, dets, directions) if directions else None
         self._misses = 0
         self._better = 0
         return det
@@ -251,9 +221,9 @@ class TargetSelector:
         return self._center is not None
 
     @property
-    def looking_away(self) -> bool:
-        """Whether we just dropped a target out of boredom and are avoiding it."""
-        return self._avoid_dir is not None and self._time() < self._avoid_until
+    def bored(self) -> bool:
+        """Whether we dropped a target out of boredom and have not locked on since."""
+        return self._bored
 
     @property
     def label(self) -> str | None:
@@ -267,8 +237,7 @@ class TargetSelector:
         self._misses = 0
         self._better = 0
         self._locked_at = None
-        self._locked_dir = None
-        self._avoid_dir = None
+        self._bored = False
 
 
 class CenterFilter:
@@ -311,17 +280,3 @@ class CenterFilter:
 
 def _dist2(a: tuple[float, float], b: tuple[float, float]) -> float:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
-
-
-def angle_between(a: Vec3, b: Vec3) -> float:
-    """Angle in radians between two unit direction vectors."""
-    dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-    return math.acos(max(-1.0, min(1.0, dot)))
-
-
-def _direction_of(det: Detection, dets: list[Detection], dirs: list[Vec3]) -> Vec3:
-    """The direction paired with `det` in the parallel `dets`/`dirs` lists."""
-    for d, vec in zip(dets, dirs):
-        if d is det:
-            return vec
-    raise ValueError("detection not in list")

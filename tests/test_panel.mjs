@@ -177,13 +177,13 @@ const tests = {
     async "the world model is listed newest first, in words"() {
         const h = harness(SOURCE);
         h.app.world = [
-            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2 },
-            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6 },
+            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2, dwelt_ago: null },
+            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6, dwelt_ago: 44.9 },
         ];
         await sleep(400);
         assert.deepEqual(h.els.world.options.map((n) => n.textContent), [
             "🐱 cat, 30° left and 5° down, 0s ago",
-            "🧍 person, 12° right, 42s ago",
+            "🧍 person, 12° right, 42s ago, watched 45s ago",
         ]);
     },
 

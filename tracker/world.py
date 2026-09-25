@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from tracker.detector import Detection
-from tracker.tracking import Vec3, angle_between
+
+# A unit direction in the world frame.
+Vec3 = tuple[float, float, float]
 
 
 @dataclass
@@ -26,6 +28,7 @@ class WorldObject:
     label: str
     direction: Vec3
     seen_at: float  # monotonic time of the last sighting
+    dwelt_at: float | None = None  # last time the head was locked onto it
 
 
 class WorldModel:
@@ -34,6 +37,9 @@ class WorldModel:
     A sighting within `match_angle` of a remembered object of the same label is
     taken to be that object, which moves to the new direction; anything else is
     a new object. Objects not seen for `forget_after` seconds are dropped.
+
+    It also remembers which objects the head has dwelt on, and when, so that
+    once bored it can steer clear of all of them rather than only the last.
     """
 
     def __init__(
@@ -49,8 +55,11 @@ class WorldModel:
         self._ids = itertools.count(1)
         self._objects: list[WorldObject] = []
 
-    def observe(self, dets: list[Detection], directions: list[Vec3]) -> None:
-        """Record one frame's detections, parallel to their world `directions`."""
+    def observe(self, dets: list[Detection], directions: list[Vec3]) -> list[int]:
+        """Record one frame's detections, returning the object id of each.
+
+        `directions` is each detection's world direction, parallel to `dets`.
+        """
         now = self._time()
         self._forget(now)
 
@@ -69,12 +78,25 @@ class WorldModel:
             if i not in matched and j not in matched.values():
                 matched[i] = j
 
+        ids = []
         for i, (det, vec) in enumerate(zip(dets, directions)):
             if i in matched:
                 obj = self._objects[matched[i]]
                 obj.direction, obj.seen_at = vec, now
             else:
-                self._objects.append(WorldObject(next(self._ids), det.label, vec, now))
+                obj = WorldObject(next(self._ids), det.label, vec, now)
+                self._objects.append(obj)
+            ids.append(obj.id)
+        return ids
+
+    def dwell(self, id: int) -> None:
+        """Note that the head is locked onto object `id` right now."""
+        self._by_id(id).dwelt_at = self._time()
+
+    def dwelt_within(self, id: int, seconds: float) -> bool:
+        """Whether the head was locked onto object `id` in the last `seconds`."""
+        dwelt_at = self._by_id(id).dwelt_at
+        return dwelt_at is not None and self._time() - dwelt_at <= seconds
 
     def objects(self) -> list[WorldObject]:
         """Everything still remembered, most recently seen first."""
@@ -92,15 +114,27 @@ class WorldModel:
                 "yaw": round(yaw, 1),
                 "pitch": round(pitch, 1),
                 "age": round(now - o.seen_at, 1),
+                "dwelt_ago": (
+                    None if o.dwelt_at is None else round(now - o.dwelt_at, 1)
+                ),
             }
             for o in self.objects()
             for yaw, pitch in [yaw_pitch(o.direction)]
         ]
 
+    def _by_id(self, id: int) -> WorldObject:
+        return next(o for o in self._objects if o.id == id)
+
     def _forget(self, now: float) -> None:
         self._objects = [
             o for o in self._objects if now - o.seen_at <= self._forget_after
         ]
+
+
+def angle_between(a: Vec3, b: Vec3) -> float:
+    """Angle in radians between two unit direction vectors."""
+    dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    return math.acos(max(-1.0, min(1.0, dot)))
 
 
 def yaw_pitch(direction: Vec3) -> tuple[float, float]:
