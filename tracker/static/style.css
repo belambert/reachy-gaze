@@ -17,7 +17,7 @@
 
 body {
     margin: 0 auto;
-    padding: 24px 16px 48px;
+    padding: 16px 14px 32px;
     max-width: 560px;
     background: var(--bg);
     color: var(--text);
@@ -25,14 +25,14 @@ body {
 }
 
 h1 {
-    margin: 0 0 20px;
-    font-size: 20px;
+    margin: 0 0 12px;
+    font-size: 17px;
     font-weight: 600;
 }
 
 .card {
-    margin-bottom: 16px;
-    padding: 16px;
+    margin-bottom: 12px;
+    padding: 12px;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--card);
@@ -42,7 +42,7 @@ h1 {
     display: flex;
     gap: 12px;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 .row:last-child {
@@ -50,16 +50,22 @@ h1 {
 }
 
 .row > span:first-child {
-    flex: 0 0 96px;
+    flex: 0 0 84px;
     color: var(--muted);
 }
 
-.row.toggle {
-    gap: 8px;
+/* Two checkboxes sharing one row, to keep the controls tight. */
+.toggles {
+    gap: 20px;
 }
 
-.row.toggle > span {
-    flex: 1;
+.toggle {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.toggle > span {
     color: var(--text);
 }
 
@@ -118,10 +124,6 @@ code {
     border-radius: 4px;
     background: var(--bg);
     font-size: 12px;
-}
-
-.hint.note {
-    margin: -8px 0 16px;
 }
 
 /* Head-aim readout under the view; steady width so the degrees don't jitter. */
