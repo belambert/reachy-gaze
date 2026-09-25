@@ -118,8 +118,14 @@ Both stay at 0 for as long as it is in focus, and start counting when the head
 looks away. Rows in focus are highlighted, and rows the head is avoiding while
 bored are greyed out. `/state` returns it as `world`, with each object's `id`,
 `label`, `direction`, `yaw`/`pitch` in degrees, `age` and `dwelt_ago` in seconds
-(`dwelt_ago` is null if it has never been watched), `focused`, `avoided`, and
+(`dwelt_ago` is null if it has never been watched), `focused`, `focused_for`
+and `bored_in` in seconds (both null when out of focus), `avoided`, and
 `thumb`.
+
+A **bored in** column counts down each object in focus to the moment the head
+tires of it: `BORED_AFTER` less how long its current stretch in focus has run.
+The first to reach zero is the one that bores the head, and the badge alongside
+the lock shows the same number.
 
 The picture is taken only of the target, on frames it is detected, since it is
 centred and steady then rather than a blurred box at the edge of a scan. The

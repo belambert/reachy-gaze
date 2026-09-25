@@ -198,6 +198,19 @@ class TestBoredom:
 
         assert self.state(looked_for=BORED_AFTER + 5).snapshot()["bored_in"] == 0.0
 
+    def test_each_object_in_focus_counts_down(self):
+        from tracker.main import BORED_AFTER
+
+        [cat] = self.state(looked_for=12.0).snapshot()["world"]
+        assert cat["bored_in"] == pytest.approx(BORED_AFTER - 12.0, abs=0.2)
+
+    def test_an_object_out_of_focus_has_no_countdown(self):
+        from tracker.detector import Detection
+
+        state = State()
+        state.world.observe([Detection("cat", 0.9, (0, 0, 1, 1))], [(1.0, 0.0, 0.0)])
+        assert state.snapshot()["world"][0]["bored_in"] is None
+
     def test_what_the_head_looks_at_is_flagged_in_the_world(self):
         from tracker.detector import Detection
 

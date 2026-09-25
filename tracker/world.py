@@ -164,6 +164,9 @@ class WorldModel:
                 ),
                 "thumb": o.thumb,
                 "focused": self._in_focus(o),
+                "focused_for": (
+                    None if o.focus_since is None else round(now - o.focus_since, 1)
+                ),
             }
             for o in self.objects()
             for yaw, pitch in [yaw_pitch(o.direction)]

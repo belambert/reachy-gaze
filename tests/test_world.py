@@ -249,6 +249,14 @@ class TestFocusedSince:
         world.look(toward(0))
         assert world.focused_since == start
 
+    def test_the_snapshot_says_how_long_each_has_been_in_focus(self, world, clock):
+        world.observe([det("cat"), det("dog")], [toward(0), toward(40)])
+        world.look(toward(0))
+        clock.t += 7.5
+        world.look(toward(0))
+        got = {o["label"]: o["focused_for"] for o in world.snapshot()}
+        assert got == {"cat": 7.5, "dog": None}
+
     def test_only_objects_in_focus_count(self, world, clock):
         world.observe([det("cat")], [toward(0)])
         world.look(toward(0))

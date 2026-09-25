@@ -180,6 +180,11 @@ class State:
                         "avoided": self.bored
                         and o["dwelt_ago"] is not None
                         and o["dwelt_ago"] <= DWELL_MEMORY,
+                        "bored_in": (
+                            None
+                            if o["focused_for"] is None
+                            else round(max(0.0, BORED_AFTER - o["focused_for"]), 1)
+                        ),
                     }
                     for o in self.world.snapshot()
                 ],

@@ -165,6 +165,9 @@ function objectCell({ label, thumb }) {
 // The world model as a table, newest first, what the head is looking at highlighted.
 function renderWorld(objects) {
     const ago = (s) => (s == null ? "–" : `${Math.round(s)}s ago`);
+    // Only objects in focus are counting down; ceil, so it reads 1s, not 0s,
+    // until the moment it actually runs out.
+    const countdown = (s) => (s == null ? "–" : `${Math.ceil(s)}s`);
     const rows = objects.map((obj) => {
         const row = document.createElement("tr");
         row.className = [obj.focused && "focused", obj.avoided && "avoided"]
@@ -172,7 +175,12 @@ function renderWorld(objects) {
             .join(" ");
         row.append(
             objectCell(obj),
-            ...[bearing(obj), ago(obj.age), ago(obj.dwelt_ago)].map((text) => {
+            ...[
+                bearing(obj),
+                ago(obj.age),
+                ago(obj.dwelt_ago),
+                countdown(obj.bored_in),
+            ].map((text) => {
                 const cell = document.createElement("td");
                 cell.textContent = text;
                 return cell;
@@ -183,7 +191,7 @@ function renderWorld(objects) {
     if (!rows.length) {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
-        cell.colSpan = 4;
+        cell.colSpan = 5;
         cell.className = "empty";
         cell.textContent = "Nothing seen lately.";
         row.append(cell);
