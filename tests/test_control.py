@@ -142,6 +142,37 @@ class TestOtherTargets:
         ]
 
 
+class TestAim:
+    """The panel is told where the head is pointing, in yaw/pitch degrees."""
+
+    def test_straight_ahead_by_default(self):
+        assert State().snapshot()["aim"] == {"yaw": 0.0, "pitch": 0.0}
+
+    def test_yaw_is_positive_to_the_left(self):
+        from scipy.spatial.transform import Rotation
+
+        from tracker.main import look_yaw_pitch
+
+        # +Y is left in the head frame, so a +30 deg turn about Z reads as left.
+        head = np.eye(4)
+        head[:3, :3] = Rotation.from_euler("Z", 30, degrees=True).as_matrix()
+        yaw, pitch = look_yaw_pitch(head)
+        assert yaw == pytest.approx(30.0)
+        assert pitch == pytest.approx(0.0, abs=1e-9)
+
+    def test_pitch_is_positive_looking_up(self):
+        from scipy.spatial.transform import Rotation
+
+        from tracker.main import look_yaw_pitch
+
+        # A -20 deg rotation about Y lifts the forward +X axis, i.e. looks up.
+        head = np.eye(4)
+        head[:3, :3] = Rotation.from_euler("Y", -20, degrees=True).as_matrix()
+        yaw, pitch = look_yaw_pitch(head)
+        assert pitch == pytest.approx(20.0)
+        assert yaw == pytest.approx(0.0, abs=1e-9)
+
+
 class TestBackendSelection:
     """The detector backend is selectable, and the panel is told the options."""
 

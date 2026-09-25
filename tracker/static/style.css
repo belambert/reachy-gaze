@@ -124,6 +124,11 @@ code {
     margin: -8px 0 16px;
 }
 
+/* Head-aim readout under the view; steady width so the degrees don't jitter. */
+.hint.aim {
+    font-variant-numeric: tabular-nums;
+}
+
 .badges {
     display: flex;
     flex-wrap: wrap;

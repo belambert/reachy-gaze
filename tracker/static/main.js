@@ -107,8 +107,21 @@ function apply(state) {
         marker.style.display = "none";
     }
     renderTargets(state.targets ?? []);
+    el("aim").textContent = aimText(state.aim);
 
     el("error").textContent = state.error || "";
+}
+
+// Head aim in words: +yaw is left, +pitch is up (see look_yaw_pitch in main.py).
+function aimText(aim) {
+    if (!aim) return "";
+    const yaw = Math.round(aim.yaw);
+    const pitch = Math.round(aim.pitch);
+    if (!yaw && !pitch) return "Aimed straight ahead.";
+    const words = [];
+    if (yaw) words.push(`${Math.abs(yaw)}° ${yaw > 0 ? "left" : "right"}`);
+    if (pitch) words.push(`${Math.abs(pitch)}° ${pitch > 0 ? "up" : "down"}`);
+    return `Aimed ${words.join(" and ")}.`;
 }
 
 // A marker's position from a center normalized to [-1, 1] on both axes.

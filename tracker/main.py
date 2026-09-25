@@ -60,6 +60,18 @@ DEFAULT_SERVER_URL = os.environ.get(
 logger = logging.getLogger(__name__)
 
 
+def look_yaw_pitch(head_pose: np.ndarray) -> tuple[float, float]:
+    """Head aim as (yaw, pitch) degrees: +yaw is left, +pitch is up, 0 is ahead.
+
+    Reads the head's forward axis (the pose rotation's +X column, which the SDK
+    aims at the target) in the head frame, where +X is forward, +Y left, +Z up.
+    """
+    fwd = head_pose[:3, 0]
+    yaw = math.degrees(math.atan2(fwd[1], fwd[0]))
+    pitch = math.degrees(math.asin(max(-1.0, min(1.0, fwd[2]))))
+    return yaw, pitch
+
+
 class Config(BaseModel):
     """Settings the control panel can change while the app runs."""
 
@@ -115,6 +127,7 @@ class State:
                 time.monotonic() - self.last_seen if self.goal is not None else None
             )
             locked = seen_ago is not None and seen_ago < LOST_AFTER
+            yaw, pitch = look_yaw_pitch(self.head_pose)
             return {
                 "enabled": self.enabled,
                 "labels": TRACK_LABELS,
@@ -134,6 +147,7 @@ class State:
                 "fps": round(self.fps, 1),
                 "center": self.center,
                 "targets": self.targets,
+                "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
                 "seen_ago": round(seen_ago, 1) if locked else None,
             }
 
