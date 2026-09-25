@@ -108,20 +108,36 @@ function apply(state) {
     }
     renderTargets(state.targets ?? []);
     el("aim").textContent = aimText(state.aim);
+    renderWorld(state.world ?? []);
 
     el("error").textContent = state.error || "";
 }
 
 // Head aim in words: +yaw is left, +pitch is up (see look_yaw_pitch in main.py).
 function aimText(aim) {
-    if (!aim) return "";
-    const yaw = Math.round(aim.yaw);
-    const pitch = Math.round(aim.pitch);
-    if (!yaw && !pitch) return "Aimed straight ahead.";
+    return aim ? `Aimed ${bearing(aim)}.` : "";
+}
+
+// A world direction in words, e.g. "20° left and 5° up".
+function bearing({ yaw, pitch }) {
+    yaw = Math.round(yaw);
+    pitch = Math.round(pitch);
+    if (!yaw && !pitch) return "straight ahead";
     const words = [];
     if (yaw) words.push(`${Math.abs(yaw)}° ${yaw > 0 ? "left" : "right"}`);
     if (pitch) words.push(`${Math.abs(pitch)}° ${pitch > 0 ? "up" : "down"}`);
-    return `Aimed ${words.join(" and ")}.`;
+    return words.join(" and ");
+}
+
+// The world model: everything seen lately, newest first, with its age.
+function renderWorld(objects) {
+    el("world").replaceChildren(
+        ...objects.map((obj) => {
+            const node = document.createElement("li");
+            node.textContent = `${emoji(obj.label)} ${obj.label}, ${bearing(obj)}, ${Math.round(obj.age)}s ago`;
+            return node;
+        }),
+    );
 }
 
 // A marker's position from a center normalized to [-1, 1] on both axes.

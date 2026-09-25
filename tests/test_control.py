@@ -142,6 +142,22 @@ class TestOtherTargets:
         ]
 
 
+class TestWorld:
+    """The panel is told what has been seen lately, and where."""
+
+    def test_empty_by_default(self):
+        assert State().snapshot()["world"] == []
+
+    def test_sightings_are_exposed_to_the_panel(self):
+        from tracker.detector import Detection
+
+        state = State()
+        state.world.observe([Detection("dog", 0.9, (0, 0, 1, 1))], [(0.0, 1.0, 0.0)])
+        [obj] = state.snapshot()["world"]
+        assert obj["label"] == "dog"
+        assert obj["yaw"] == pytest.approx(90.0)
+
+
 class TestAim:
     """The panel is told where the head is pointing, in yaw/pitch degrees."""
 

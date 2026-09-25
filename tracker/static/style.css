@@ -131,6 +131,16 @@ code {
     font-variant-numeric: tabular-nums;
 }
 
+/* The world model: what has been seen lately, and where. */
+.world {
+    margin: 6px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--muted);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
 .badges {
     display: flex;
     flex-wrap: wrap;

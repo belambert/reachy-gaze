@@ -29,6 +29,7 @@ from tracker.tracking import (
     pixel_center,
     pose_matrix,
 )
+from tracker.world import WorldModel, yaw_pitch
 
 # Hunted for together, and in preference order: a cat in view outranks a person
 # in view, and the head will leave the one for the other.
@@ -49,6 +50,7 @@ LOCK_TIMEOUT = 15.0  # seconds on one target before breaking off to scan for oth
 LOOK_AWAY = 10.0  # seconds steering clear of the abandoned target while scanning
 STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
+FORGET_AFTER = 120.0  # seconds before an unseen object drops out of the world model
 
 # Which detection backend to use, and where to reach it. Both are prefilled in
 # the control panel and overridable from the environment without editing code.
@@ -69,10 +71,8 @@ def look_yaw_pitch(head_pose: np.ndarray) -> tuple[float, float]:
     of all seven joints, body yaw included, so the turntable's contribution is
     already in here — do not add body yaw again.
     """
-    fwd = head_pose[:3, 0]
-    yaw = math.degrees(math.atan2(fwd[1], fwd[0]))
-    pitch = math.degrees(math.asin(max(-1.0, min(1.0, fwd[2]))))
-    return yaw, pitch
+    x, y, z = head_pose[:3, 0]
+    return yaw_pitch((float(x), float(y), float(z)))
 
 
 class Config(BaseModel):
@@ -122,6 +122,8 @@ class State:
         # Every other box in view, so the panel can show what the head is
         # ignoring: {"label", "center": [x, y]} in the same normalized coords.
         self.targets: list[dict] = []
+        # What has been seen lately and where, kept while the head looks away.
+        self.world = WorldModel(forget_after=FORGET_AFTER)
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -151,6 +153,7 @@ class State:
                 "center": self.center,
                 "targets": self.targets,
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
+                "world": self.world.snapshot(),
                 "seen_ago": round(seen_ago, 1) if locked else None,
             }
 
@@ -340,6 +343,7 @@ class Tracker(ReachyMiniApp):
                 smoother.reset()
 
             with state.lock:
+                state.world.observe(dets, dirs)
                 state.detector_ok = True
                 state.error = ""
                 # Measured rate matters more than the cap; the panel shows it.

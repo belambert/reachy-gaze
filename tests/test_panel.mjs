@@ -44,7 +44,7 @@ function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
         "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
-        "badge-fps", "marker", "error", "aim", "targets",
+        "badge-fps", "marker", "error", "aim", "targets", "world",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
@@ -91,7 +91,11 @@ function harness(source, { stateStatus = 200 } = {}) {
     }
 
     const ctx = {
-        document: { getElementById: (id) => els[id] ?? null, activeElement: null },
+        document: {
+            getElementById: (id) => els[id] ?? null,
+            createElement: (tag) => makeEl(tag),
+            activeElement: null,
+        },
         fetch: fetchStub,
         Option: function (text, value) { return { text, value }; },
         setTimeout, clearTimeout, setInterval, clearInterval, console,
@@ -168,6 +172,19 @@ const tests = {
         Object.assign(h.app, { locked: false, seen_ago: null });
         await sleep(400);
         assert.equal(lock.textContent, "searching");
+    },
+
+    async "the world model is listed newest first, in words"() {
+        const h = harness(SOURCE);
+        h.app.world = [
+            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2 },
+            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6 },
+        ];
+        await sleep(400);
+        assert.deepEqual(h.els.world.options.map((n) => n.textContent), [
+            "🐱 cat, 30° left and 5° down, 0s ago",
+            "🧍 person, 12° right, 42s ago",
+        ]);
     },
 
     async "a stale poll must not steal what was typed"() {

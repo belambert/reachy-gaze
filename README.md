@@ -72,6 +72,30 @@ still being watched when it reappears. The panel distinguishes the two:
 **locked** while sightings are arriving, **holding** with the age of the last
 one while the head waits it out.
 
+### The world model
+
+Alongside the one target it aims at, the robot keeps a short-term memory of
+everything it has seen lately (`tracker/world.py`). Each entry holds the
+object's type, its location, and when it was last seen. It keeps every box of
+every tracked class, not only the target.
+
+The location is a **unit direction** in the world frame (+X forward, +Y left, +Z
+up), not a point in space: a single camera gives a bearing but no range. It is
+the same absolute direction the look-away logic uses, so an object stays put in
+memory while the head turns away from it.
+
+Each frame, a sighting within 15° of a remembered object with the same label
+counts as that object. The object moves to the new direction and its age
+resets. Anything else becomes a new entry. Closest pairs are matched first, so
+two cats side by side keep their own entries. An object not seen for
+`FORGET_AFTER` seconds is dropped. Nothing removes an object early when the
+head looks where it was and finds nothing, so something that has moved on
+lingers until it ages out.
+
+The panel lists the world under the aim readout, newest first, e.g. "🐱 cat, 30°
+left and 5° down, 4s ago". `/state` returns it as `world`, with each object's
+`id`, `label`, `direction`, `yaw`/`pitch` in degrees, and `age` in seconds.
+
 ## Running it
 
 ### 1. Start a detector
@@ -198,6 +222,7 @@ Constants live at the top of `tracker/main.py`:
 | `LOCK_TIMEOUT`   | 15.0    | Seconds on one target before breaking off to scan for others |
 | `LOOK_AWAY`      | 10.0    | Seconds steering clear of the abandoned target while scanning |
 | `STALE_AFTER`    | 5.0     | Seconds before the panel calls a lock held rather than live |
+| `FORGET_AFTER`   | 120.0   | Seconds before an unseen object leaves the world model    |
 | `SCAN_DEGREES`   | 90.0    | Half-width of the scan                                    |
 | `SCAN_HZ`        | 0.04    | Scan rate                                                 |
 
@@ -300,8 +325,8 @@ its key, label, default address, and constructor.
     uv run pytest
     uv run black tracker tests && uv run isort tracker tests
 
-The tests cover target selection, smoothing, the slew math, and the detector
-wire protocol against a stub server. None of them need a robot. The panel's
+The tests cover target selection, the world model, smoothing, the slew math,
+and the detector wire protocol against a stub server. None of them need a robot. The panel's
 state sync has its own suite, which needs Node but no dependencies:
 
     node tests/test_panel.mjs
