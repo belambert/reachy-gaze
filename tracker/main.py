@@ -106,7 +106,7 @@ class State:
         self.enabled = True
         # What the head is currently locked onto, not what it is looking for.
         self.label = ""
-        self.conf = 0.4
+        self.conf = 0.75
         self.server_url = DEFAULT_SERVER_URL
         self.backend = DEFAULT_BACKEND
         self.scan = True
