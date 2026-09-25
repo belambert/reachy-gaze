@@ -165,6 +165,40 @@ class TestLens:
         assert State().snapshot()["lens"] is None
 
 
+class TestBoredom:
+    """The panel is told how long until the head tires of its target."""
+
+    def test_no_countdown_without_a_lock(self):
+        snap = State().snapshot()
+        assert snap["bored_in"] is None and snap["bored"] is False
+
+    def test_counts_down_to_the_deadline(self):
+        import time
+
+        state = State()
+        state.bored_at = time.monotonic() + 7.0
+        assert state.snapshot()["bored_in"] == pytest.approx(7.0, abs=0.2)
+
+    def test_never_negative(self):
+        import time
+
+        state = State()
+        state.bored_at = time.monotonic() - 1.0
+        assert state.snapshot()["bored_in"] == 0.0
+
+    def test_the_target_is_flagged_in_the_world(self):
+        from tracker.detector import Detection
+
+        state = State()
+        cat, dog = state.world.observe(
+            [Detection("cat", 0.9, (0, 0, 1, 1)), Detection("dog", 0.9, (0, 0, 1, 1))],
+            [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        )
+        state.target_id = dog
+        flags = {o["label"]: o["target"] for o in state.snapshot()["world"]}
+        assert flags == {"cat": False, "dog": True}
+
+
 class TestAim:
     """The panel is told where the head is pointing, in yaw/pitch degrees."""
 

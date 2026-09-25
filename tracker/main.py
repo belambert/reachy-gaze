@@ -127,13 +127,17 @@ class State:
         # Camera intrinsics and frame size, so the panel can draw rings of equal
         # angle off the camera axis; None until the first frame arrives.
         self.lens: dict | None = None
+        # Boredom, for the panel's countdown: when the current lock will be
+        # dropped (monotonic), and whether it already has been.
+        self.bored_at: float | None = None
+        self.bored = False
+        self.target_id: int | None = None  # world object the head is locked onto
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
         with self.lock:
-            seen_ago = (
-                time.monotonic() - self.last_seen if self.goal is not None else None
-            )
+            now = time.monotonic()
+            seen_ago = now - self.last_seen if self.goal is not None else None
             locked = seen_ago is not None and seen_ago < LOST_AFTER
             yaw, pitch = look_yaw_pitch(self.head_pose)
             return {
@@ -156,7 +160,16 @@ class State:
                 "center": self.center,
                 "targets": self.targets,
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
-                "world": self.world.snapshot(),
+                "world": [
+                    {**o, "target": o["id"] == self.target_id}
+                    for o in self.world.snapshot()
+                ],
+                "bored": self.bored,
+                "bored_in": (
+                    None
+                    if self.bored_at is None
+                    else round(max(0.0, self.bored_at - now), 1)
+                ),
                 "lens": self.lens,
                 "seen_ago": round(seen_ago, 1) if locked else None,
             }
@@ -316,6 +329,7 @@ class Tracker(ReachyMiniApp):
                 smoother.reset()
                 with state.lock:
                     state.targets = []
+                    state.bored_at, state.bored, state.target_id = None, False, None
                 stop_event.wait(0.2)
                 continue
 
@@ -348,8 +362,14 @@ class Tracker(ReachyMiniApp):
                 smoother.reset()
 
             with state.lock:
-                if det is not None:
-                    state.world.dwell(next(i for d, i in zip(dets, ids) if d is det))
+                state.target_id = (
+                    next(i for d, i in zip(dets, ids) if d is det)
+                    if det is not None
+                    else None
+                )
+                if state.target_id is not None:
+                    state.world.dwell(state.target_id)
+                state.bored_at, state.bored = selector.bored_at, selector.bored
                 state.lens = {
                     "fx": float(K[0, 0]),
                     "fy": float(K[1, 1]),

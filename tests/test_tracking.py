@@ -166,6 +166,34 @@ class TestBoredom:
         assert got is cat, "comes back when nothing else turns up"
         assert not sel.bored
 
+    def test_bored_at_is_the_lock_time_plus_the_timeout(self):
+        clock = Clock()
+        sel = self.selector(clock)
+        assert sel.bored_at is None, "no lock, nothing to tire of"
+
+        clock.t = 3.0
+        sel.select([box(320, 240, size=150)], W, H)
+        assert sel.bored_at == 13.0
+
+    def test_bored_at_clears_when_bored_or_lost(self):
+        clock = Clock()
+        sel = self.selector(clock, max_misses=0)
+        cat = box(320, 240, size=150)
+        sel.select([cat], W, H)
+        clock.t = 10.0
+        sel.select([cat], W, H, [True])
+        assert sel.bored_at is None
+
+        sel = self.selector(clock, max_misses=0)
+        sel.select([cat], W, H)
+        sel.select([], W, H)  # lost
+        assert sel.bored_at is None
+
+    def test_no_max_lock_is_never_bored(self):
+        sel = TargetSelector()
+        sel.select([box(320, 240, size=150)], W, H)
+        assert sel.bored_at is None
+
     def test_the_timer_restarts_on_the_new_target(self):
         clock = Clock()
         sel = self.selector(clock)

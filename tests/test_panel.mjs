@@ -44,7 +44,8 @@ function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
         "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
-        "badge-fps", "marker", "error", "aim", "targets", "world", "view", "rings",
+        "badge-fps", "badge-bored", "marker", "error", "aim", "targets", "world",
+        "view", "rings",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
@@ -174,17 +175,48 @@ const tests = {
         assert.equal(lock.textContent, "searching");
     },
 
-    async "the world model is listed newest first, in words"() {
+    async "the world model is a table, newest first, the target highlighted"() {
         const h = harness(SOURCE);
         h.app.world = [
-            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2, dwelt_ago: null },
-            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6, dwelt_ago: 44.9 },
+            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2, dwelt_ago: 0.2, target: true },
+            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6, dwelt_ago: null, target: false },
         ];
         await sleep(400);
-        assert.deepEqual(h.els.world.options.map((n) => n.textContent), [
-            "🐱 cat, 30° left and 5° down, 0s ago",
-            "🧍 person, 12° right, 42s ago, watched 45s ago",
+        const rows = h.els.world.options;
+        assert.deepEqual(rows.map((r) => r.options.map((c) => c.textContent)), [
+            ["🐱 cat", "30° left and 5° down", "0s ago", "0s ago"],
+            ["🧍 person", "12° right", "42s ago", "–"],
         ]);
+        assert.deepEqual(rows.map((r) => r.className), ["target-row", ""]);
+    },
+
+    async "an empty world says so"() {
+        const h = harness(SOURCE);
+        h.app.world = [];
+        await sleep(60);
+        const [row] = h.els.world.options;
+        assert.equal(row.options[0].textContent, "Nothing seen lately.");
+    },
+
+    async "the boredom badge counts down, then says it is bored"() {
+        const h = harness(SOURCE);
+        await sleep(60);
+        const node = h.els["badge-bored"];
+        assert.ok(node.hidden, "nothing to tire of, nothing to show");
+
+        Object.assign(h.app, { bored: false, bored_in: 6.2 });
+        await sleep(400);
+        assert.ok(!node.hidden);
+        assert.equal(node.textContent, "bored in 7s");
+
+        Object.assign(h.app, { bored: true, bored_in: null });
+        await sleep(400);
+        assert.equal(node.textContent, "bored: avoiding recent targets");
+        assert.ok(node.classList.contains("warn"));
+
+        Object.assign(h.app, { bored: false, bored_in: null });
+        await sleep(400);
+        assert.ok(node.hidden);
     },
 
     async "rings are drawn every 10 degrees out to the frame's corners"() {

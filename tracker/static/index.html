@@ -56,6 +56,7 @@
             <span class="badge" id="badge-detector">detector</span>
             <span class="badge" id="badge-lock">lock</span>
             <span class="badge" id="badge-fps">&ndash; fps</span>
+            <span class="badge" id="badge-bored" hidden></span>
         </div>
         <div class="view" id="view">
             <div class="crosshair"></div>
@@ -64,7 +65,12 @@
             <div class="marker" id="marker"></div>
         </div>
         <p class="hint aim" id="aim"></p>
-        <ul class="world" id="world"></ul>
+        <table class="world">
+            <thead>
+                <tr><th>Object</th><th>Where</th><th>Seen</th><th>Watched</th></tr>
+            </thead>
+            <tbody id="world"></tbody>
+        </table>
         <p class="error" id="error"></p>
     </section>
 

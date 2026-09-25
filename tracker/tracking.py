@@ -221,6 +221,13 @@ class TargetSelector:
         return self._center is not None
 
     @property
+    def bored_at(self) -> float | None:
+        """When the current lock will be dropped out of boredom, if there is one."""
+        if self._max_lock is None or self._locked_at is None or self._center is None:
+            return None
+        return self._locked_at + self._max_lock
+
+    @property
     def bored(self) -> bool:
         """Whether we dropped a target out of boredom and have not locked on since."""
         return self._bored

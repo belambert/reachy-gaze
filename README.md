@@ -96,11 +96,16 @@ two cats side by side keep their own entries. An object not seen for
 head looks where it was and finds nothing, so something that has moved on
 lingers until it ages out.
 
-The panel lists the world under the aim readout, newest first, e.g. "🐱 cat, 30°
-left and 5° down, 4s ago, watched 20s ago". `/state` returns it as `world`, with
-each object's `id`, `label`, `direction`, `yaw`/`pitch` in degrees, and `age`
-and `dwelt_ago` in seconds (`dwelt_ago` is null if it has never been the
-target).
+The panel shows the world as a table under the aim readout, newest first: each
+object's type, its bearing (e.g. "30° left and 5° down"), and how long ago it was
+seen and watched. The row the head is locked onto is highlighted. `/state`
+returns it as `world`, with each object's `id`, `label`, `direction`,
+`yaw`/`pitch` in degrees, `age` and `dwelt_ago` in seconds (`dwelt_ago` is null
+if it has never been the target), and `target`.
+
+A badge alongside the lock counts down to boredom ("bored in 7s") while the head
+holds a target, then reads "bored: avoiding recent targets" until something new
+takes the lock. `/state` carries these as `bored_in` and `bored`.
 
 ## Running it
 

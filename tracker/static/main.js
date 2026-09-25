@@ -102,6 +102,7 @@ function apply(state) {
     }
 
     el("badge-fps").textContent = state.detector_ok ? `${state.fps} fps` : "– fps";
+    boredom(state);
 
     const marker = el("marker");
     if (state.center && state.locked) {
@@ -136,17 +137,42 @@ function bearing({ yaw, pitch }) {
     return words.join(" and ");
 }
 
-// The world model: everything seen lately, newest first, with its age and,
-// if the head has locked onto it, how long ago that was.
+// Counts down to the head tiring of its target; once it has, says so until
+// something new takes the lock. Hidden when there is neither.
+function boredom({ bored, bored_in }) {
+    const node = el("badge-bored");
+    node.hidden = !bored && bored_in == null;
+    if (bored) badge("badge-bored", "warn", "bored: avoiding recent targets");
+    else if (bored_in != null) badge("badge-bored", "", `bored in ${Math.ceil(bored_in)}s`);
+}
+
+// The world model as a table, newest first, the current target highlighted.
 function renderWorld(objects) {
-    el("world").replaceChildren(
-        ...objects.map((obj) => {
-            const node = document.createElement("li");
-            const watched = obj.dwelt_ago == null ? "" : `, watched ${Math.round(obj.dwelt_ago)}s ago`;
-            node.textContent = `${emoji(obj.label)} ${obj.label}, ${bearing(obj)}, ${Math.round(obj.age)}s ago${watched}`;
-            return node;
-        }),
-    );
+    const ago = (s) => (s == null ? "–" : `${Math.round(s)}s ago`);
+    const rows = objects.map((obj) => {
+        const row = document.createElement("tr");
+        row.className = obj.target ? "target-row" : "";
+        row.append(
+            ...[`${emoji(obj.label)} ${obj.label}`, bearing(obj), ago(obj.age), ago(obj.dwelt_ago)].map(
+                (text) => {
+                    const cell = document.createElement("td");
+                    cell.textContent = text;
+                    return cell;
+                },
+            ),
+        );
+        return row;
+    });
+    if (!rows.length) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 4;
+        cell.className = "empty";
+        cell.textContent = "Nothing seen lately.";
+        row.append(cell);
+        rows.push(row);
+    }
+    el("world").replaceChildren(...rows);
 }
 
 // A marker's position from a center normalized to [-1, 1] on both axes.
