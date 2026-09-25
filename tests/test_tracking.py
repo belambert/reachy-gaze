@@ -373,6 +373,22 @@ class TestPosture:
         phase = Tracker._scan_phase(Rotation.from_euler("Z", 20.0, degrees=True))
         assert self.yaw(Tracker._scan_pose(0.5, phase)) > 20.0
 
+    def test_a_scan_from_the_left_heads_further_left_not_back(self):
+        # Regression: asin always set off toward +yaw, so a head panned to a
+        # negative yaw turned straight back to centre and never swept that side.
+        from tracker.main import Tracker
+
+        phase = Tracker._scan_phase(Rotation.from_euler("Z", -20.0, degrees=True))
+        assert self.yaw(Tracker._scan_pose(0.5, phase)) < -20.0
+
+    def test_a_scan_continues_the_way_the_head_is_turning(self):
+        # Still turning negative as the target is lost: keep going, don't reverse.
+        from tracker.main import Tracker
+
+        start = Rotation.from_euler("Z", 0.0, degrees=True)
+        phase = Tracker._scan_phase(start, rate=-1.0)
+        assert self.yaw(Tracker._scan_pose(0.5, phase)) < 0.0
+
     def test_an_angle_beyond_the_scan_is_clamped_not_undefined(self):
         from tracker.main import SCAN_DEGREES, Tracker
 

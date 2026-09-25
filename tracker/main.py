@@ -212,12 +212,14 @@ class Tracker(ReachyMiniApp):
             # 0 searching, 1 locked on, eased so the antennas never snap.
             perk += (float(aimed) - perk) * (1.0 - math.exp(-dt / BLEND_TAU))
 
-            # Start each scan from wherever the head already is. Running the
-            # sine off a fixed epoch meant it began at an arbitrary phase, so
-            # losing a target swung the head to centre and then out again.
+            # Start each scan from wherever the head already is, carrying on the
+            # way it was turning. Running the sine off a fixed epoch meant it
+            # began at an arbitrary phase, so losing a target swung the head to
+            # centre and then out again; ignoring the direction meant it always
+            # set off the same way and left one side of the room unswept.
             if scanning and not was_scanning:  # a scan starts on this tick
                 scan_t0 = now
-                scan_phase = self._scan_phase(smoother.rotation)
+                scan_phase = self._scan_phase(smoother.rotation, smoother.omega[2])
             was_scanning = scanning
 
             if not aimed:
@@ -386,18 +388,32 @@ class Tracker(ReachyMiniApp):
         return Rotation.from_euler("Z", yaw, degrees=True)
 
     @staticmethod
-    def _scan_phase(rotation: Rotation) -> float:
-        """The scan phase whose starting yaw matches `rotation`."""
+    def _scan_phase(rotation: Rotation, rate: float = 0.0) -> float:
+        """The scan phase whose starting yaw matches `rotation`, heading on.
+
+        `rate` is the head's current yaw velocity. The scan carries on the way
+        the head is already turning, so losing a target that was moving keeps
+        the head chasing it rather than reversing. Once the head has settled
+        (`rate` ~ 0, e.g. after holding a lost aim), it presses on outward from
+        centre instead — never straight back through ground already covered.
+        """
         yaw, _, _ = rotation.as_euler("ZYX", degrees=True)
-        return Tracker._phase_at(yaw, SCAN_DEGREES)
+        heading = rate if abs(rate) > 1e-3 else yaw
+        return Tracker._phase_at(yaw, SCAN_DEGREES, heading)
 
     @staticmethod
-    def _phase_at(angle: float, amplitude: float) -> float:
-        """Where in a sine of `amplitude` the value `angle` sits, heading out."""
+    def _phase_at(angle: float, amplitude: float, heading: float = 1.0) -> float:
+        """Phase of a sine of `amplitude` at `angle`, on the branch `heading` picks.
+
+        A given `angle` sits at two phases, one rising and one falling; `heading`
+        chooses which, so the scan can leave that point in either direction.
+        """
         if amplitude <= 0.0:  # an axis turned off must not become a NaN pose
             return 0.0
-        # asin keeps the scan heading outward from here rather than reversing.
-        return math.asin(max(-1.0, min(1.0, angle / amplitude)))
+        base = math.asin(max(-1.0, min(1.0, angle / amplitude)))
+        # asin is the rising branch (yaw increasing); pi - asin is the falling
+        # one. Pick whichever leaves the current yaw going the way we want.
+        return base if heading >= 0 else math.pi - base
 
     @staticmethod
     def _antennas(perk: float, t: float) -> np.ndarray:
