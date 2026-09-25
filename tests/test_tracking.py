@@ -64,148 +64,81 @@ class TestSelector:
         assert sel.has_target
 
 
-class Clock:
-    """A hand-advanced stand-in for time.monotonic."""
-
-    def __init__(self):
-        self.t = 0.0
-
-    def __call__(self):
-        return self.t
-
-
 class TestBoredom:
-    """Holding one target too long must break the lock so the head scans again.
+    """Once told to tire, the selector drops its target and shuns as told.
 
-    What to shun while looking away is the caller's decision (the world model's,
-    in the app); the tests pass the per-box mask directly.
+    When to tire, and what to shun, are the caller's decisions (the world
+    model's, in the app); the tests make them directly.
     """
 
-    def selector(self, clock, **kw):
-        return TargetSelector(max_lock=10.0, time_fn=clock, **kw)
-
-    def test_no_max_lock_holds_the_lock_forever(self):
-        # The default (no boredom timer) must not change: it stays locked.
+    def test_never_bored_unless_told(self):
         sel = TargetSelector()
-        sel.select([box(320, 240, size=150)], W, H)
         for _ in range(1000):
-            sel.select([box(320, 240, size=150)], W, H)
-        assert sel.has_target
+            sel.select([box(320, 240, size=150)], W, H, [True])
+        assert sel.has_target and not sel.bored, "shunning waits for boredom"
 
-    def test_keeps_the_lock_until_the_timer_expires(self):
-        clock = Clock()
-        sel = self.selector(clock)
-        cat = box(320, 240, size=150)
-        sel.select([cat], W, H, [True])
-
-        clock.t = 9.9
-        assert sel.select([cat], W, H, [True]) is cat, "shunning waits for boredom"
-        assert sel.has_target and not sel.bored
-
-    def test_drops_the_lock_once_bored(self):
-        clock = Clock()
-        sel = self.selector(clock)
+    def test_tiring_drops_the_target(self):
+        sel = TargetSelector()
         cat = box(320, 240, size=150)
         sel.select([cat], W, H)
 
-        clock.t = 10.0
-        assert sel.select([cat], W, H, [True]) is None, "the sole target is shunned"
+        sel.tire()
         assert not sel.has_target and sel.bored
+        assert sel.select([cat], W, H, [True]) is None, "the sole target is shunned"
 
     def test_without_a_mask_nothing_is_shunned(self):
-        clock = Clock()
-        sel = self.selector(clock)
+        sel = TargetSelector()
         cat = box(320, 240, size=150)
         sel.select([cat], W, H)
 
-        clock.t = 10.0
+        sel.tire()
         assert sel.select([cat], W, H) is cat, "dropped, but promptly re-taken"
 
     def test_keeps_shunning_while_it_drifts_across_the_frame(self):
-        clock = Clock()
-        sel = self.selector(clock)
+        sel = TargetSelector()
         sel.select([box(100, 240)], W, H)
 
-        clock.t = 10.0
+        sel.tire()
         for cx in range(100, 620, 30):
-            clock.t += 0.1
             assert sel.select([box(cx, 240)], W, H, [True]) is None, f"took it at {cx}"
         assert sel.bored
 
     def test_skips_every_shunned_box_for_one_that_is_not(self):
-        clock = Clock()
-        sel = self.selector(clock)
+        sel = TargetSelector()
         old, older, fresh = box(100, 240), box(320, 240, size=200), box(560, 240)
         sel.select([old], W, H)
 
-        clock.t = 10.0
+        sel.tire()
         # The biggest box is shunned too: only `fresh` may be taken.
         assert sel.select([old, older, fresh], W, H, [True, True, False]) is fresh
+        assert not sel.bored, "a fresh lock ends the boredom"
 
     def test_stays_bored_for_as_long_as_the_target_is_shunned(self):
-        clock = Clock()
-        sel = self.selector(clock)
+        sel = TargetSelector()
         cat = box(320, 240, size=150)
         sel.select([cat], W, H)
 
-        clock.t = 10.0
-        assert sel.select([cat], W, H, [True]) is None
-        clock.t = 1000.0  # no timer of its own: the mask decides
-        assert sel.select([cat], W, H, [True]) is None
+        sel.tire()
+        for _ in range(100):
+            assert sel.select([cat], W, H, [True]) is None
         assert sel.bored
 
     def test_returns_to_the_only_target_once_it_is_no_longer_shunned(self):
-        clock = Clock()
-        sel = self.selector(clock)
+        sel = TargetSelector()
         cat = box(320, 240, size=150)
         sel.select([cat], W, H)
 
-        clock.t = 10.0
+        sel.tire()
         assert sel.select([cat], W, H, [True]) is None
         got = sel.select([cat], W, H, [False])  # its dwell has aged out
         assert got is cat, "comes back when nothing else turns up"
         assert not sel.bored
 
-    def test_bored_at_is_the_lock_time_plus_the_timeout(self):
-        clock = Clock()
-        sel = self.selector(clock)
-        assert sel.bored_at is None, "no lock, nothing to tire of"
-
-        clock.t = 3.0
-        sel.select([box(320, 240, size=150)], W, H)
-        assert sel.bored_at == 13.0
-
-    def test_bored_at_clears_when_bored_or_lost(self):
-        clock = Clock()
-        sel = self.selector(clock, max_misses=0)
-        cat = box(320, 240, size=150)
-        sel.select([cat], W, H)
-        clock.t = 10.0
-        sel.select([cat], W, H, [True])
-        assert sel.bored_at is None
-
-        sel = self.selector(clock, max_misses=0)
-        sel.select([cat], W, H)
-        sel.select([], W, H)  # lost
-        assert sel.bored_at is None
-
-    def test_no_max_lock_is_never_bored(self):
+    def test_reset_ends_boredom(self):
         sel = TargetSelector()
-        sel.select([box(320, 240, size=150)], W, H)
-        assert sel.bored_at is None
-
-    def test_the_timer_restarts_on_the_new_target(self):
-        clock = Clock()
-        sel = self.selector(clock)
-        here, there = box(100, 240, size=150), box(560, 240, size=150)
-        sel.select([here, there], W, H)
-
-        clock.t = 10.0
-        sel.select([here, there], W, H, [True, False])  # swings to the other object
-        assert not sel.bored, "a fresh lock ends the boredom"
-        clock.t = 15.0  # 5s on the new one: not yet bored again
-        assert sel.select([here, there], W, H, [True, False]) is there
-        assert sel.has_target
+        sel.tire()
+        sel.reset()
+        assert not sel.bored
 
 
 class TestCenterFilter:

@@ -55,14 +55,21 @@ subjects, and the minimum-area gate still applies — a stray speck of cat will
 not pull the head off a person standing right there. The preference does not
 run backwards: once on the cat, a person cannot take it back.
 
-It also does not fixate forever. After `LOCK_TIMEOUT` seconds on one target the
-lock is dropped and the head starts scanning again to see what else is around.
-Until it locks onto something new, it passes over **everything it has dwelt on
-in the last `DWELL_MEMORY` seconds**, not just the target it tired of, so it
-doesn't bounce straight back to the cat it watched a minute ago. Which objects
-those are comes from the [world model](#the-world-model), which tracks them by
-world direction rather than position in frame, so the scanning head cannot
-slide the block off them. When nothing else turns up, each old target becomes
+It also does not fixate forever. Boredom is measured against the **objects in
+the [world model](#the-world-model)**, not individual detections: once any
+object has been in focus — within `FOCUS_DEGREES` of where the head is aimed —
+for `BORED_AFTER` seconds straight, the head gets bored and starts scanning
+again to see what else is around. The clock keeps running while the head holds
+its aim on a target that comes and goes, so a cat half-hidden behind a chair,
+seen one frame in three, still wears out its welcome. It belongs to the object,
+not the direction, so a person followed slowly across the room wears out theirs
+too. Only the head looking away from it, or giving up and scanning, starts it
+over. Until it locks onto something new, it passes over **everything it has
+watched in the last `DWELL_MEMORY` seconds** — everything that was in focus, not
+just the target it tired of — so it doesn't bounce straight back to the cat it
+watched a minute ago. The world model tracks objects by world direction rather
+than position in frame, so the scanning head cannot slide the block off them.
+When nothing else turns up, each old target becomes
 fair game again once `DWELL_MEMORY` seconds have passed since it was last
 watched — so with a single subject in the room, the head scans for that long
 before coming back to it.
@@ -78,10 +85,16 @@ one while the head waits it out.
 
 Alongside the one target it aims at, the robot keeps a short-term memory of
 everything it has seen lately (`tracker/world.py`). Each entry holds the
-object's type, its location, when it was last seen, when the head last dwelt on
-it (was locked onto it), and a small picture of it from the last time the head
-was locked onto it. It keeps every box of every tracked class, not
-only the target.
+object's type, its location, when it was last seen, when the head last watched
+it, and a small picture of it from the last time it was the target. It keeps
+every box of every tracked class, not only the target.
+
+It also follows where the head is looking. While the head holds its aim —
+tracking, or holding on for `LOST_AFTER` after the last sighting — every object
+within `FOCUS_DEGREES` of the aim is **in focus**: watched, and counted as seen,
+even on frames the detector misses it. Each object keeps when its current
+stretch in focus began, which is what boredom is timed by. Scanning looks
+nowhere in particular.
 
 The location is a **unit direction** in the world frame (+X forward, +Y left, +Z
 up), not a point in space: a single camera gives a bearing but no range. It is
@@ -100,25 +113,24 @@ lingers until it ages out.
 The panel shows the world as a table under the aim readout, newest first: each
 object's picture and type, its bearing as arrows (e.g. "←30° ↓5°" for 30° left
 and 5° down), then two ages. **Last seen** is how long since it was last
-detected, and **last watched** how long since the head was last locked onto it.
-Both stay at 0 for the whole of a lock, frames the detector misses included,
-and start counting when it ends. The row the head is locked onto is
-highlighted. `/state`
-returns it as `world`, with each object's `id`, `label`, `direction`,
-`yaw`/`pitch` in degrees, `age` and `dwelt_ago` in seconds (`dwelt_ago` is null
-if it has never been the target), `target`, and `thumb`.
+detected, and **last watched** how long since the head last looked its way.
+Both stay at 0 for as long as it is in focus, and start counting when the head
+looks away. Rows in focus are highlighted. `/state` returns it as `world`, with
+each object's `id`, `label`, `direction`, `yaw`/`pitch` in degrees, `age` and
+`dwelt_ago` in seconds (`dwelt_ago` is null if it has never been watched),
+`focused`, and `thumb`.
 
-The picture is taken only while the head is locked onto the object, since it is
-centred and steady then rather than a blurred box at the edge of a scan. Each
-frame's target box is cropped and scaled to fill 48×36 px, then shown at half
+The picture is taken only of the target, on frames it is detected, since it is
+centred and steady then rather than a blurred box at the edge of a scan. The
+target's box is cropped and scaled to fill 48×36 px, then shown at half
 that so it sits on the text's line without making the row any taller. It is
 sent as a JPEG data URI of 1–2 KB, and takes about 0.1 ms to make on an M4
-laptop; the robot's Pi will be slower, but not measured. An object never locked
-onto has no picture, and shows its emoji instead.
+laptop; the robot's Pi will be slower, but not measured. An object never the
+target has no picture, and shows its emoji instead.
 
-A badge alongside the lock counts down to boredom ("bored in 7s") while the head
-holds a target, then reads "bored: avoiding recent targets" until something new
-takes the lock. `/state` carries these as `bored_in` and `bored`.
+A badge alongside the lock counts down to boredom ("bored in 7s") while
+something is in focus, from whichever object has been in focus longest, then
+reads "bored: avoiding recent targets" until something new takes the lock. `/state` carries these as `bored_in` and `bored`.
 
 ## Running it
 
@@ -246,7 +258,8 @@ Constants live at the top of `tracker/main.py`:
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
-| `LOCK_TIMEOUT`   | 30.0    | Seconds on one target before breaking off to scan for others |
+| `BORED_AFTER`    | 30.0    | Seconds watching one object before breaking off to scan   |
+| `FOCUS_DEGREES`  | 20.0    | Objects this close to the aim count as being watched      |
 | `STALE_AFTER`    | 5.0     | Seconds before the panel calls a lock held rather than live |
 | `FORGET_AFTER`   | 120.0   | Seconds before an unseen object leaves the world model    |
 | `DWELL_MEMORY`   | 60.0    | Seconds a watched object stays shunned once bored         |

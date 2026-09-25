@@ -172,8 +172,8 @@ code {
     vertical-align: middle;
 }
 
-/* The object the head is locked onto. */
-.world .target-row td {
+/* Whatever lies the way the head is looking. */
+.world .focused td {
     color: var(--ok);
 }
 

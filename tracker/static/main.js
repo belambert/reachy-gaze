@@ -162,12 +162,12 @@ function objectCell({ label, thumb }) {
     return cell;
 }
 
-// The world model as a table, newest first, the current target highlighted.
+// The world model as a table, newest first, what the head is looking at highlighted.
 function renderWorld(objects) {
     const ago = (s) => (s == null ? "–" : `${Math.round(s)}s ago`);
     const rows = objects.map((obj) => {
         const row = document.createElement("tr");
-        row.className = obj.target ? "target-row" : "";
+        row.className = obj.focused ? "focused" : "";
         row.append(
             objectCell(obj),
             ...[bearing(obj), ago(obj.age), ago(obj.dwelt_ago)].map((text) => {

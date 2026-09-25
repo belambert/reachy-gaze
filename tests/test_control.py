@@ -166,37 +166,73 @@ class TestLens:
 
 
 class TestBoredom:
-    """The panel is told how long until the head tires of its target."""
+    """The panel is told how long until the head tires of the way it is looking."""
 
-    def test_no_countdown_without_a_lock(self):
+    def state(self, looked_for):
+        """A State whose head has watched a cat for `looked_for` seconds."""
+        import time
+
+        from tracker.detector import Detection
+        from tracker.world import WorldModel
+
+        start = time.monotonic() - looked_for
+        clock = iter([start] * 2 + [time.monotonic()] * 100)
+        state = State()
+        state.world = WorldModel(time_fn=lambda: next(clock))
+        state.world.observe([Detection("cat", 0.9, (0, 0, 1, 1))], [(1.0, 0.0, 0.0)])
+        state.world.look((1.0, 0.0, 0.0))
+        return state
+
+    def test_no_countdown_while_scanning(self):
         snap = State().snapshot()
         assert snap["bored_in"] is None and snap["bored"] is False
 
-    def test_counts_down_to_the_deadline(self):
-        import time
+    def test_counts_down_from_when_the_look_began(self):
+        from tracker.main import BORED_AFTER
 
-        state = State()
-        state.bored_at = time.monotonic() + 7.0
-        assert state.snapshot()["bored_in"] == pytest.approx(7.0, abs=0.2)
+        snap = self.state(looked_for=12.0).snapshot()
+        assert snap["bored_in"] == pytest.approx(BORED_AFTER - 12.0, abs=0.2)
 
     def test_never_negative(self):
-        import time
+        from tracker.main import BORED_AFTER
 
-        state = State()
-        state.bored_at = time.monotonic() - 1.0
-        assert state.snapshot()["bored_in"] == 0.0
+        assert self.state(looked_for=BORED_AFTER + 5).snapshot()["bored_in"] == 0.0
 
-    def test_the_target_is_flagged_in_the_world(self):
+    def test_what_the_head_looks_at_is_flagged_in_the_world(self):
         from tracker.detector import Detection
 
         state = State()
-        cat, dog = state.world.observe(
+        state.world.observe(
             [Detection("cat", 0.9, (0, 0, 1, 1)), Detection("dog", 0.9, (0, 0, 1, 1))],
             [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
         )
-        state.target_id = dog
-        flags = {o["label"]: o["target"] for o in state.snapshot()["world"]}
+        state.world.look((0.0, 1.0, 0.0))
+        flags = {o["label"]: o["focused"] for o in state.snapshot()["world"]}
         assert flags == {"cat": False, "dog": True}
+
+
+class TestHeldAim:
+    """The direction the head holds, which is what boredom is timed against."""
+
+    def test_none_without_a_goal(self):
+        import time
+
+        assert State().aim(time.monotonic()) is None
+
+    def test_the_goal_is_held_through_the_lost_window(self):
+        import time
+
+        from scipy.spatial.transform import Rotation
+
+        from tracker.main import LOST_AFTER
+
+        state = State()
+        state.goal = Rotation.from_euler("Z", 90, degrees=True)
+        state.last_seen = time.monotonic()
+        # Looking left (+Y) with nothing seen for most of the window.
+        aim = state.aim(state.last_seen + LOST_AFTER - 0.1)
+        assert aim == pytest.approx((0.0, 1.0, 0.0), abs=1e-9)
+        assert state.aim(state.last_seen + LOST_AFTER) is None
 
 
 class TestAim:
@@ -254,3 +290,76 @@ class TestBackendSelection:
 
         with pytest.raises(ValidationError):
             Config(backend="nope")
+
+
+class TestBoredOfADirection:
+    """End to end through the vision loop: boredom follows the aim, not a lock."""
+
+    class Camera:
+        K = np.array([[500.0, 0, 320], [0, 500.0, 240], [0, 0, 1]])
+        D = np.zeros(5)
+
+    class Media:
+        camera = None
+
+        def get_frame(self):
+            return np.zeros((480, 640, 3), np.uint8)
+
+    class Mini:
+        def __init__(self, media):
+            self.media = media
+
+    class Flickering:
+        """A cat seen one frame in `every`, so the selector keeps losing it."""
+
+        def __init__(self, every):
+            self.every, self.calls = every, 0
+
+        def classes(self):
+            return ["cat"]
+
+        def detect(self, frame, labels, conf):
+            from tracker.detector import Detection
+
+            self.calls += 1
+            if self.calls % self.every:
+                return []
+            return [Detection("cat", 0.9, (300.0, 220.0, 380.0, 300.0))]
+
+    def test_an_intermittent_target_still_bores_the_head(self, monkeypatch):
+        import tracker.main as main
+
+        monkeypatch.setattr(main, "DETECT_HZ", 100.0)
+        monkeypatch.setattr(main, "BORED_AFTER", 0.5)
+        # Gaps of 20 frames outlast the selector's 12-miss tolerance, so every
+        # sighting is a fresh lock: a per-lock timer would never run out.
+        detector = self.Flickering(every=20)
+        monkeypatch.setattr(main, "make_detector", lambda backend, url: detector)
+
+        media = self.Media()
+        media.camera = self.Camera()
+        state, stop = State(), threading.Event()
+        vision = threading.Thread(
+            target=Tracker()._track_forever,
+            args=(self.Mini(media), state, stop),
+            daemon=True,
+        )
+        vision.start()
+        try:
+            deadline = time_now() + 3.0
+            while not state.bored and time_now() < deadline:
+                stop.wait(0.02)
+        finally:
+            stop.set()
+            vision.join(timeout=2.0)
+
+        assert state.bored, "never tired of the direction"
+        assert state.goal is None, "the aim is dropped so the head scans"
+        [cat] = state.world.snapshot()
+        assert cat["dwelt_ago"] is not None, "the cat that way was watched"
+
+
+def time_now():
+    import time
+
+    return time.monotonic()

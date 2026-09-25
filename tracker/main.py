@@ -29,7 +29,7 @@ from tracker.tracking import (
     pixel_center,
     pose_matrix,
 )
-from tracker.world import WorldModel, thumbnail, yaw_pitch
+from tracker.world import Vec3, WorldModel, thumbnail, yaw_pitch
 
 # Hunted for together, and in preference order: a cat in view outranks a person
 # in view, and the head will leave the one for the other.
@@ -46,7 +46,8 @@ BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 SCAN_DEGREES = 90.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
-LOCK_TIMEOUT = 30.0  # seconds on one target before breaking off to scan for others
+BORED_AFTER = 30.0  # seconds watching one object before breaking off to scan
+FOCUS_DEGREES = 20.0  # objects this close to the aim count as being watched
 STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 FORGET_AFTER = 120.0  # seconds before an unseen object drops out of the world model
@@ -123,15 +124,26 @@ class State:
         # ignoring: {"label", "center": [x, y]} in the same normalized coords.
         self.targets: list[dict] = []
         # What has been seen lately and where, kept while the head looks away.
-        self.world = WorldModel(forget_after=FORGET_AFTER)
+        self.world = WorldModel(
+            forget_after=FORGET_AFTER, focus_angle=math.radians(FOCUS_DEGREES)
+        )
         # Camera intrinsics and frame size, so the panel can draw rings of equal
         # angle off the camera axis; None until the first frame arrives.
         self.lens: dict | None = None
-        # Boredom, for the panel's countdown: when the current lock will be
-        # dropped (monotonic), and whether it already has been.
-        self.bored_at: float | None = None
+        # Whether the head got bored and has not found anything new since; the
+        # countdown to boredom comes from the world model's objects in focus.
         self.bored = False
-        self.target_id: int | None = None  # world object the head is locked onto
+
+    def aim(self, now: float) -> Vec3 | None:
+        """World direction the head is holding its aim on, or None if scanning.
+
+        The same test the control loop uses, so "looking that way" includes the
+        LOST_AFTER hold after the last sighting, not just frames with one.
+        """
+        if self.goal is None or now - self.last_seen >= LOST_AFTER:
+            return None
+        x, y, z = self.goal.as_matrix()[:, 0]
+        return (float(x), float(y), float(z))
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -160,15 +172,12 @@ class State:
                 "center": self.center,
                 "targets": self.targets,
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
-                "world": [
-                    {**o, "target": o["id"] == self.target_id}
-                    for o in self.world.snapshot()
-                ],
+                "world": self.world.snapshot(),
                 "bored": self.bored,
                 "bored_in": (
                     None
-                    if self.bored_at is None
-                    else round(max(0.0, self.bored_at - now), 1)
+                    if (since := self.world.focused_since) is None
+                    else round(max(0.0, since + BORED_AFTER - now), 1)
                 ),
                 "lens": self.lens,
                 "seen_ago": round(seen_ago, 1) if locked else None,
@@ -302,7 +311,7 @@ class Tracker(ReachyMiniApp):
         K, D = camera.K, camera.D
         T_head_cam = getattr(mini, "T_head_cam", None)
 
-        selector = TargetSelector(TRACK_LABELS, max_lock=LOCK_TIMEOUT)
+        selector = TargetSelector(TRACK_LABELS)
         smoother = CenterFilter()
         detector: Detector | None = None
         detector_key: tuple[str, str] | None = None
@@ -329,7 +338,8 @@ class Tracker(ReachyMiniApp):
                 smoother.reset()
                 with state.lock:
                     state.targets = []
-                    state.bored_at, state.bored, state.target_id = None, False, None
+                    state.world.look(None)
+                    state.bored = False
                 stop_event.wait(0.2)
                 continue
 
@@ -356,23 +366,25 @@ class Tracker(ReachyMiniApp):
             dirs = [self._direction(d, K, D, head_pose, T_head_cam) for d in dets]
             with state.lock:
                 ids = state.world.observe(dets, dirs)
-                shunned = [state.world.dwelt_within(i, DWELL_MEMORY) for i in ids]
+                world = state.world
+                world.look(state.aim(time.monotonic()))
+                # Bored of an object watched too long, whether or not it kept
+                # showing: everything in focus was just watched, so it is all
+                # shunned, and the head goes looking elsewhere.
+                since = world.focused_since
+                if since is not None and time.monotonic() - since >= BORED_AFTER:
+                    selector.tire()
+                    world.look(None)
+                shunned = [world.dwelt_within(i, DWELL_MEMORY) for i in ids]
             det = selector.select(dets, width, height, shunned)
             if det is None and not selector.has_target:
                 smoother.reset()
 
             with state.lock:
-                # Locked for as long as the selector holds the target, not just
-                # on frames the detector happened to find it, so the panel's
-                # "last seen" and "last watched" stay at zero through a miss.
                 if det is not None:
-                    state.target_id = next(i for d, i in zip(dets, ids) if d is det)
-                elif not selector.has_target:
-                    state.target_id = None
-                if state.target_id is not None:
-                    thumb = thumbnail(frame, det) if det is not None else None
-                    state.world.dwell(state.target_id, thumb)
-                state.bored_at, state.bored = selector.bored_at, selector.bored
+                    target = next(i for d, i in zip(dets, ids) if d is det)
+                    state.world.photograph(target, thumbnail(frame, det))
+                state.bored = selector.bored
                 state.lens = {
                     "fx": float(K[0, 0]),
                     "fy": float(K[1, 1]),

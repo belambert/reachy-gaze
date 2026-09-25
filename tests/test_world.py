@@ -124,51 +124,138 @@ def test_observe_names_each_sighting_consistently(world):
     assert again == first[::-1]
 
 
-class TestDwell:
-    def test_never_dwelt_by_default(self, world):
+class TestLook:
+    """Where the head is aiming: what is in focus, and for how long."""
+
+    def test_never_watched_by_default(self, world):
         [id] = world.observe([det("cat")], [toward(0)])
         assert not world.dwelt_within(id, 60.0)
-        assert world.snapshot()[0]["dwelt_ago"] is None
-
-    def test_dwelling_is_remembered_for_the_window(self, world, clock):
-        [id] = world.observe([det("cat")], [toward(0)])
-        world.dwell(id)
-
-        clock.t += 30.0
-        assert world.dwelt_within(id, 60.0)
-        assert world.snapshot()[0]["dwelt_ago"] == 30.0
-
-        clock.t += 30.1
-        assert not world.dwelt_within(id, 60.0)
-
-    def test_the_dwell_follows_the_object_as_it_moves(self, world):
-        [id] = world.observe([det("cat")], [toward(0)])
-        world.dwell(id)
-        [moved] = world.observe([det("cat")], [toward(10)])
-        assert moved == id and world.dwelt_within(id, 60.0)
-
-    def test_a_locked_object_counts_as_seen_through_a_miss(self, world, clock):
-        [id] = world.observe([det("cat")], [toward(0)])
-        clock.t += 0.5
-        world.observe([], [])  # the detector missed it, but the lock holds
-        world.dwell(id)
         [obj] = world.snapshot()
-        assert obj["age"] == 0.0 and obj["dwelt_ago"] == 0.0
+        assert obj["dwelt_ago"] is None and not obj["focused"]
 
-    def test_both_ages_count_up_once_the_lock_ends(self, world, clock):
+    def test_looking_at_an_object_watches_and_focuses_it(self, world):
         [id] = world.observe([det("cat")], [toward(0)])
-        world.dwell(id)
+        world.look(toward(5))
+        assert world.dwelt_within(id, 60.0)
+        assert world.snapshot()[0]["focused"]
+
+    def test_only_what_lies_that_way_is_in_focus(self, world):
+        cat, dog = world.observe([det("cat"), det("dog")], [toward(0), toward(40)])
+        world.look(toward(0))
+        assert world.dwelt_within(cat, 60.0)
+        assert not world.dwelt_within(dog, 60.0)
+        assert {o["label"]: o["focused"] for o in world.snapshot()} == {
+            "cat": True,
+            "dog": False,
+        }
+
+    def test_everything_that_way_is_in_focus_not_just_one(self, world):
+        # Bored of a direction means bored of everything over there.
+        a, b = world.observe([det("cat"), det("dog")], [toward(0), toward(12)])
+        world.look(toward(5))
+        assert world.dwelt_within(a, 60.0) and world.dwelt_within(b, 60.0)
+
+    def test_in_focus_counts_as_seen_through_a_miss(self, world, clock):
+        world.observe([det("cat")], [toward(0)])
+        clock.t += 5.0
+        world.observe([], [])  # the detector missed it; the head still aims there
+        world.look(toward(0))
+        [obj] = world.snapshot()
+        assert obj["age"] == 0.0 and obj["dwelt_ago"] == 0.0 and obj["focused"]
+
+    def test_both_ages_count_up_once_the_head_looks_away(self, world, clock):
+        world.observe([det("cat")], [toward(0)])
+        world.look(toward(0))
         clock.t += 4.0
-        world.observe([det("cat")], [toward(0)])  # still seen, no longer locked
+        world.look(None)  # scanning
+        world.observe([det("cat")], [toward(0)])  # glimpsed in passing
         clock.t += 2.0
         [obj] = world.snapshot()
         assert obj["age"] == 2.0 and obj["dwelt_ago"] == 6.0
+        assert not obj["focused"]
 
-    def test_only_the_object_dwelt_on_is_marked(self, world):
-        cat, dog = world.observe([det("cat"), det("dog")], [toward(0), toward(40)])
-        world.dwell(cat)
-        assert world.dwelt_within(cat, 60.0)
-        assert not world.dwelt_within(dog, 60.0)
+    def test_watching_is_remembered_for_the_window(self, world, clock):
+        [id] = world.observe([det("cat")], [toward(0)])
+        world.look(toward(0))
+        world.look(None)
+
+        clock.t += 60.0
+        assert world.dwelt_within(id, 60.0)
+        clock.t += 0.1
+        assert not world.dwelt_within(id, 60.0)
+
+
+class TestFocusedSince:
+    """How long the objects in focus have been watched: what boredom counts."""
+
+    def test_nothing_in_focus_while_scanning(self, world):
+        world.observe([det("cat")], [toward(0)])
+        world.look(None)
+        assert world.focused_since is None
+
+    def test_no_object_there_no_clock(self, world):
+        world.observe([det("cat")], [toward(0)])
+        world.look(toward(60))
+        assert world.focused_since is None
+
+    def test_a_stretch_begins_when_an_object_comes_into_focus(self, world, clock):
+        world.observe([det("cat")], [toward(0)])
+        world.look(toward(0))
+        assert world.focused_since == clock.t
+
+    def test_the_head_can_wander_while_the_object_stays_in_focus(self, world, clock):
+        start = clock.t
+        world.observe([det("cat")], [toward(0)])
+        for yaw in (0, 8, -12, 19, 3):
+            world.look(toward(yaw))
+            clock.t += 5.0
+        assert world.focused_since == start
+
+    def test_an_intermittent_target_keeps_its_stretch(self, world, clock):
+        # The head holds its aim while the detector keeps missing the cat.
+        start = clock.t
+        world.observe([det("cat")], [toward(0)])
+        world.look(toward(0))
+        for _ in range(25):
+            clock.t += 1.0
+            world.observe([], [])
+            world.look(toward(0))
+        assert world.focused_since == start
+
+    def test_a_moving_object_keeps_its_stretch_however_far_it_goes(self, world, clock):
+        # Followed across 60°: the clock is the object's, not the direction's.
+        start = clock.t
+        for yaw in range(0, 61, 5):
+            world.observe([det("person")], [toward(yaw)])
+            world.look(toward(yaw))
+            clock.t += 1.0
+        assert world.focused_since == start
+        assert len(world.objects()) == 1
+
+    def test_looking_away_ends_the_stretch(self, world, clock):
+        world.observe([det("cat")], [toward(0)])
+        world.look(toward(0))
+        clock.t += 10.0
+        world.look(None)
+        world.look(toward(0))
+        assert world.focused_since == clock.t
+
+    def test_the_longest_stretch_counts(self, world, clock):
+        start = clock.t
+        world.observe([det("cat")], [toward(0)])
+        world.look(toward(0))
+        clock.t += 10.0
+        world.observe([det("dog")], [toward(10)])  # joins it in focus later
+        world.look(toward(0))
+        assert world.focused_since == start
+
+    def test_only_objects_in_focus_count(self, world, clock):
+        world.observe([det("cat")], [toward(0)])
+        world.look(toward(0))
+        clock.t += 10.0
+        world.look(toward(40))  # turned away from it
+        assert world.focused_since is None
+        assert world.snapshot()[0]["focused"] is False
 
 
 class TestThumbnail:
@@ -197,29 +284,22 @@ class TestThumbnail:
         assert img.size == THUMB_SIZE
 
 
-def test_no_picture_until_locked_on(world):
+def test_no_picture_until_photographed(world):
     world.observe([det("cat")], [toward(0)])
+    world.look(toward(0))
     assert world.snapshot()[0]["thumb"] is None
 
 
-def test_the_picture_comes_from_the_latest_lock(world):
+def test_the_latest_photograph_is_kept(world):
     [id] = world.observe([det("cat")], [toward(0)])
-    world.dwell(id, "data:a")
-    world.observe([det("cat")], [toward(1)])
-    world.dwell(id, "data:b")
+    world.photograph(id, "data:a")
+    world.photograph(id, "data:b")
     assert world.snapshot()[0]["thumb"] == "data:b"
 
 
-def test_the_picture_outlasts_the_lock(world):
-    # Seen again, but not locked on: the picture from the lock stays.
+def test_the_picture_outlasts_the_look(world):
     [id] = world.observe([det("cat")], [toward(0)])
-    world.dwell(id, "data:a")
+    world.photograph(id, "data:a")
+    world.look(None)
     world.observe([det("cat")], [toward(1)])
-    assert world.snapshot()[0]["thumb"] == "data:a"
-
-
-def test_dwelling_without_a_picture_keeps_the_old_one(world):
-    [id] = world.observe([det("cat")], [toward(0)])
-    world.dwell(id, "data:a")
-    world.dwell(id)
     assert world.snapshot()[0]["thumb"] == "data:a"

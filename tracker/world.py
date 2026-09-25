@@ -38,8 +38,9 @@ class WorldObject:
     label: str
     direction: Vec3
     seen_at: float  # monotonic time of the last sighting
-    dwelt_at: float | None = None  # last time the head was locked onto it
-    thumb: str | None = None  # JPEG data URI, taken while the head was locked on
+    dwelt_at: float | None = None  # last time the head was looking its way
+    focus_since: float | None = None  # start of the current stretch in focus
+    thumb: str | None = None  # JPEG data URI, taken while it was the target
 
 
 class WorldModel:
@@ -49,22 +50,29 @@ class WorldModel:
     taken to be that object, which moves to the new direction; anything else is
     a new object. Objects not seen for `forget_after` seconds are dropped.
 
-    It also remembers which objects the head has dwelt on, and when, so that
-    once bored it can steer clear of all of them rather than only the last.
+    It also follows where the head is looking. Every object within
+    `focus_angle` of the aim is in focus: it counts as seen and watched, even on
+    frames the detector misses it, and each keeps the start of its current
+    stretch in focus. That stretch is what boredom is measured against, so an
+    intermittent target still wears out its welcome, and a moving one does too:
+    the stretch follows the object, not the direction.
     """
 
     def __init__(
         self,
         match_angle: float = math.radians(15.0),
         forget_after: float = 60.0,
+        focus_angle: float = math.radians(20.0),
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
-        """Start with an empty world."""
+        """Start with an empty world, looking nowhere in particular."""
         self._match_angle = match_angle
         self._forget_after = forget_after
+        self._focus_angle = focus_angle
         self._time = time_fn
         self._ids = itertools.count(1)
         self._objects: list[WorldObject] = []
+        self._aim: Vec3 | None = None
 
     def observe(self, dets: list[Detection], directions: list[Vec3]) -> list[int]:
         """Record one frame's detections, returning the object id of each.
@@ -100,23 +108,38 @@ class WorldModel:
             ids.append(obj.id)
         return ids
 
-    def dwell(self, id: int, thumb: str | None = None) -> None:
-        """Note that the head is locked onto object `id` right now.
+    def look(self, aim: Vec3 | None) -> None:
+        """Note where the head is aimed now, or None while it is scanning."""
+        now = self._time()
+        self._aim = aim
+        for obj in self._objects:
+            if self._in_focus(obj):
+                obj.seen_at = obj.dwelt_at = now
+                if obj.focus_since is None:
+                    obj.focus_since = now
+            else:
+                obj.focus_since = None
 
-        Being locked on counts as being seen, even on a frame the detector
-        missed it, so neither age starts counting until the lock ends.
+    @property
+    def focused_since(self) -> float | None:
+        """Start of the longest current stretch in focus, if anything is in focus.
 
-        `thumb` is its picture from this frame. Only pictures taken while locked
-        on are kept: the head is aimed at the object then, so it is centred and
-        steady rather than a blurred box at the edge of a scan.
+        The longest, because it is the first to run out: once one object there
+        has been watched long enough, the head is bored of all of them.
         """
-        obj = self._by_id(id)
-        obj.seen_at = obj.dwelt_at = self._time()
-        if thumb is not None:
-            obj.thumb = thumb
+        starts = [o.focus_since for o in self._objects if o.focus_since is not None]
+        return min(starts, default=None)
+
+    def photograph(self, id: int, thumb: str) -> None:
+        """Give object `id` a new picture.
+
+        Only the target's is taken: the head is aimed at it then, so it is
+        centred and steady rather than a blurred box at the edge of a scan.
+        """
+        self._by_id(id).thumb = thumb
 
     def dwelt_within(self, id: int, seconds: float) -> bool:
-        """Whether the head was locked onto object `id` in the last `seconds`."""
+        """Whether the head was looking at object `id` in the last `seconds`."""
         dwelt_at = self._by_id(id).dwelt_at
         return dwelt_at is not None and self._time() - dwelt_at <= seconds
 
@@ -140,10 +163,17 @@ class WorldModel:
                     None if o.dwelt_at is None else round(now - o.dwelt_at, 1)
                 ),
                 "thumb": o.thumb,
+                "focused": self._in_focus(o),
             }
             for o in self.objects()
             for yaw, pitch in [yaw_pitch(o.direction)]
         ]
+
+    def _in_focus(self, obj: WorldObject) -> bool:
+        return (
+            self._aim is not None
+            and angle_between(obj.direction, self._aim) <= self._focus_angle
+        )
 
     def _by_id(self, id: int) -> WorldObject:
         return next(o for o in self._objects if o.id == id)

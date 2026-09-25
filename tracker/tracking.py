@@ -7,9 +7,6 @@ smooth its center before it reaches the control loop.
 
 from __future__ import annotations
 
-import time
-from typing import Callable
-
 import numpy as np
 import numpy.typing as npt
 from scipy.spatial.transform import Rotation
@@ -110,12 +107,11 @@ class TargetSelector:
     flickering at the confidence threshold cannot bounce the head between two
     subjects.
 
-    `max_lock` is the boredom timer: hold one target that long and the lock is
-    dropped so the scan can look for others. It stays bored until it locks onto
-    something new, and meanwhile passes over any detection flagged in the
-    `shunned` mask given to `select`, so the head turns to something else rather
-    than snapping straight back. What to shun, and for how long, is the caller's
-    call (the world model's, in practice); without a mask the lock is still
+    `tire` drops the target out of boredom; when to, is the caller's call (the
+    world model times it, by direction). The selector then stays bored until it
+    locks onto something new, and meanwhile passes over any detection flagged in
+    the `shunned` mask given to `select`, so the head turns to something else
+    rather than snapping straight back. Without a mask the lock is still
     dropped, but nothing is steered clear of.
     """
 
@@ -126,8 +122,6 @@ class TargetSelector:
         max_jump: float = 0.5,
         max_misses: int = 12,
         upgrade_after: int = 3,
-        max_lock: float | None = None,
-        time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         """Create a selector with the given preference and association gates."""
         self._priority = list(priority or [])
@@ -135,13 +129,10 @@ class TargetSelector:
         self._max_jump = max_jump
         self._max_misses = max_misses
         self._upgrade_after = upgrade_after
-        self._max_lock = max_lock
-        self._time = time_fn
         self._center: tuple[float, float] | None = None
         self._label: str | None = None
         self._misses = 0
         self._better = 0
-        self._locked_at: float | None = None
         self._bored = False
 
     def select(
@@ -156,18 +147,6 @@ class TargetSelector:
         `shunned`, parallel to `dets`, flags detections to pass over while
         bored of the last target.
         """
-        now = self._time()
-
-        # Bored of a target held too long: drop it and shun what the caller
-        # says to, so the scan turns up something else instead.
-        if (
-            self._max_lock is not None
-            and self._locked_at is not None
-            and now - self._locked_at >= self._max_lock
-        ):
-            self._bored = True
-            self._center = self._label = self._locked_at = None
-
         if self._bored and shunned:
             dets = [d for d, shun in zip(dets, shunned) if not shun]
 
@@ -194,8 +173,7 @@ class TargetSelector:
                 self._miss()
                 return None
 
-        if acquiring:  # a fresh lock restarts the boredom timer and ends boredom
-            self._locked_at = now
+        if acquiring:  # a fresh lock ends boredom
             self._bored = False
         self._center = norm_center(det, width, height)
         self._label = det.label
@@ -221,16 +199,14 @@ class TargetSelector:
         return self._center is not None
 
     @property
-    def bored_at(self) -> float | None:
-        """When the current lock will be dropped out of boredom, if there is one."""
-        if self._max_lock is None or self._locked_at is None or self._center is None:
-            return None
-        return self._locked_at + self._max_lock
-
-    @property
     def bored(self) -> bool:
         """Whether we dropped a target out of boredom and have not locked on since."""
         return self._bored
+
+    def tire(self) -> None:
+        """Drop the target out of boredom, shunning until something new is locked."""
+        self._bored = True
+        self._center = self._label = None
 
     @property
     def label(self) -> str | None:
@@ -243,7 +219,6 @@ class TargetSelector:
         self._label = None
         self._misses = 0
         self._better = 0
-        self._locked_at = None
         self._bored = False
 
 

@@ -175,11 +175,11 @@ const tests = {
         assert.equal(lock.textContent, "searching");
     },
 
-    async "the world model is a table, newest first, the target highlighted"() {
+    async "the world model is a table, newest first, what's in focus highlighted"() {
         const h = harness(SOURCE);
         h.app.world = [
-            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2, dwelt_ago: 0.2, target: true },
-            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6, dwelt_ago: null, target: false },
+            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2, dwelt_ago: 0.2, focused: true },
+            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6, dwelt_ago: null, focused: false },
         ];
         await sleep(400);
         const rows = h.els.world.options;
@@ -188,7 +188,7 @@ const tests = {
             ["→12°", "42s ago", "–"],
         ]);
         assert.deepEqual(rows.map((r) => r.options[0].options.at(-1)), [" cat", " person"]);
-        assert.deepEqual(rows.map((r) => r.className), ["target-row", ""]);
+        assert.deepEqual(rows.map((r) => r.className), ["focused", ""]);
     },
 
     async "each object shows its picture, or its emoji until it has one"() {
