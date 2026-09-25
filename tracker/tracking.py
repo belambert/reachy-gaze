@@ -191,7 +191,7 @@ class TargetSelector:
             # barely does.
             keep, keep_d, nearest_gap, nearest_dir = [], [], self._avoid_angle, None
             for d, vec in zip(dets, directions):
-                gap = _angle_between(vec, self._avoid_dir)
+                gap = angle_between(vec, self._avoid_dir)
                 if gap > self._avoid_angle:
                     keep.append(d)
                     keep_d.append(vec)
@@ -313,7 +313,7 @@ def _dist2(a: tuple[float, float], b: tuple[float, float]) -> float:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
 
-def _angle_between(a: Vec3, b: Vec3) -> float:
+def angle_between(a: Vec3, b: Vec3) -> float:
     """Angle in radians between two unit direction vectors."""
     dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
     return math.acos(max(-1.0, min(1.0, dot)))
