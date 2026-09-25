@@ -147,6 +147,23 @@ class TestDwell:
         [moved] = world.observe([det("cat")], [toward(10)])
         assert moved == id and world.dwelt_within(id, 60.0)
 
+    def test_a_locked_object_counts_as_seen_through_a_miss(self, world, clock):
+        [id] = world.observe([det("cat")], [toward(0)])
+        clock.t += 0.5
+        world.observe([], [])  # the detector missed it, but the lock holds
+        world.dwell(id)
+        [obj] = world.snapshot()
+        assert obj["age"] == 0.0 and obj["dwelt_ago"] == 0.0
+
+    def test_both_ages_count_up_once_the_lock_ends(self, world, clock):
+        [id] = world.observe([det("cat")], [toward(0)])
+        world.dwell(id)
+        clock.t += 4.0
+        world.observe([det("cat")], [toward(0)])  # still seen, no longer locked
+        clock.t += 2.0
+        [obj] = world.snapshot()
+        assert obj["age"] == 2.0 and obj["dwelt_ago"] == 6.0
+
     def test_only_the_object_dwelt_on_is_marked(self, world):
         cat, dog = world.observe([det("cat"), det("dog")], [toward(0), toward(40)])
         world.dwell(cat)

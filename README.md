@@ -98,8 +98,12 @@ head looks where it was and finds nothing, so something that has moved on
 lingers until it ages out.
 
 The panel shows the world as a table under the aim readout, newest first: each
-object's picture and type, its bearing as arrows (e.g. "←30° ↓5°" for 30° left and 5° down),
-and how long ago it was seen and watched. The row the head is locked onto is highlighted. `/state`
+object's picture and type, its bearing as arrows (e.g. "←30° ↓5°" for 30° left
+and 5° down), then two ages. **Last seen** is how long since it was last
+detected, and **last watched** how long since the head was last locked onto it.
+Both stay at 0 for the whole of a lock, frames the detector misses included,
+and start counting when it ends. The row the head is locked onto is
+highlighted. `/state`
 returns it as `world`, with each object's `id`, `label`, `direction`,
 `yaw`/`pitch` in degrees, `age` and `dwelt_ago` in seconds (`dwelt_ago` is null
 if it has never been the target), `target`, and `thumb`.

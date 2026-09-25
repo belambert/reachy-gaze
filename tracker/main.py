@@ -362,13 +362,16 @@ class Tracker(ReachyMiniApp):
                 smoother.reset()
 
             with state.lock:
-                state.target_id = (
-                    next(i for d, i in zip(dets, ids) if d is det)
-                    if det is not None
-                    else None
-                )
+                # Locked for as long as the selector holds the target, not just
+                # on frames the detector happened to find it, so the panel's
+                # "last seen" and "last watched" stay at zero through a miss.
                 if det is not None:
-                    state.world.dwell(state.target_id, thumbnail(frame, det))
+                    state.target_id = next(i for d, i in zip(dets, ids) if d is det)
+                elif not selector.has_target:
+                    state.target_id = None
+                if state.target_id is not None:
+                    thumb = thumbnail(frame, det) if det is not None else None
+                    state.world.dwell(state.target_id, thumb)
                 state.bored_at, state.bored = selector.bored_at, selector.bored
                 state.lens = {
                     "fx": float(K[0, 0]),

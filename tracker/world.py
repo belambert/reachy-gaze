@@ -103,12 +103,15 @@ class WorldModel:
     def dwell(self, id: int, thumb: str | None = None) -> None:
         """Note that the head is locked onto object `id` right now.
 
+        Being locked on counts as being seen, even on a frame the detector
+        missed it, so neither age starts counting until the lock ends.
+
         `thumb` is its picture from this frame. Only pictures taken while locked
         on are kept: the head is aimed at the object then, so it is centred and
         steady rather than a blurred box at the edge of a scan.
         """
         obj = self._by_id(id)
-        obj.dwelt_at = self._time()
+        obj.seen_at = obj.dwelt_at = self._time()
         if thumb is not None:
             obj.thumb = thumb
 
