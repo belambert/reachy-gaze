@@ -39,7 +39,7 @@ CONTROL_HZ = 50.0
 DETECT_HZ = 12.0  # request ceiling; the server is usually quicker than this
 SMOOTH_TAU = 0.09  # follower time constant; larger is smoother and laggier
 MAX_HEAD_SPEED = 3.5  # rad/s ceiling on commanded head rotation
-MAX_HEAD_PULL = 10.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
+MAX_HEAD_PULL = 5.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
 BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 # The body's yaw joint allows +/-160 degrees; this keeps the scan to the front
 # of the robot, well inside that.

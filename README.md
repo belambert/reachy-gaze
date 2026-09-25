@@ -236,7 +236,7 @@ Constants live at the top of `tracker/main.py`:
 | ---------------- | ------- | --------------------------------------------------------- |
 | `DETECT_HZ`      | 12      | Ceiling on detection requests                             |
 | `SMOOTH_TAU`     | 0.09    | Follower time constant; larger is smoother and laggier    |
-| `MAX_HEAD_PULL`  | 10.0    | rad/s² cap on the follower's pull; **lower is gentler**   |
+| `MAX_HEAD_PULL`  | 5.0     | rad/s² cap on the follower's pull; **lower is gentler**   |
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
@@ -269,8 +269,8 @@ settles at the speed where the capped pull balances damping,
 
     terminal speed = MAX_HEAD_PULL * SMOOTH_TAU / 2
 
-which is **0.45 rad/s, about 26°/s** at the defaults. Simulated, the peak speed
-closing a 20°, 60°, 120° or 179° gap is the same 26°/s every time — distance
+which is **0.225 rad/s, about 13°/s** at the defaults. Simulated, the peak speed
+closing a 20°, 60°, 120° or 179° gap is the same 13°/s every time — distance
 changes how long it takes, never how fast it gets there. `MAX_HEAD_SPEED` is a
 backstop that never binds at these settings.
 
@@ -283,10 +283,11 @@ For comparison, over a full scan cycle starting from rest:
 | Motion                          | Peak speed | Peak acceleration |
 | ------------------------------- | ---------- | ----------------- |
 | Scan, 90° yaw                   | 23 °/s     | 97 °/s²           |
-| Tracking a 40° step (pull 10)   | 26 °/s     | 318 °/s²          |
+| Tracking a 40° step (pull 5)    | 13 °/s     | 159 °/s²          |
 
-The scan is gentler than ordinary tracking, so if it looks unsteady on hardware
-the commanded path is not the cause. Look instead at automatic body yaw, if the
+The scan moves faster than tracking does at the default, but it accelerates
+more gently, so if it looks unsteady on hardware the commanded path is not the
+cause. Look instead at automatic body yaw, if the
 scan is widened far enough to lean on it, or at the servos, which judder at the
 very low speeds around each turnaround.
 
@@ -297,21 +298,25 @@ the dial that trades smoothness against chasing power — and, as above, it sets
 the speed ceiling for any large movement.
 
 Measured against a 40° step, with the time taken to settle within a degree of
-it, and the mean lag behind a subject crossing the view:
+it, and the mean lag behind a brisk subject — swinging ±40° of yaw at 0.15 Hz,
+detected at 12 Hz, averaged after the first 10 s:
 
 | Responsiveness | Peak speed | Peak acceleration | Settles in | Mean lag |
 | -------------- | ---------- | ----------------- | ---------- | -------- |
-| 4              | 10 °/s     | 127 °/s²          | 3.80 s     | —        |
-| 10 (default)   | 26 °/s     | 318 °/s²          | 1.60 s     | 8.2°     |
+| 4              | 10 °/s     | 127 °/s²          | 3.80 s     | 23.5°    |
+| 5 (default)    | 13 °/s     | 159 °/s²          | 3.06 s     | 22.2°    |
+| 10             | 26 °/s     | 318 °/s²          | 1.60 s     | 10.1°    |
 | 20             | 52 °/s     | 637 °/s²          | 0.92 s     | 4.2°     |
-| 60             | 150 °/s    | 1910 °/s²         | 0.56 s     | —        |
+| 60             | 150 °/s    | 1910 °/s²         | 0.56 s     | 4.2°     |
 
 Every setting still converges without overshoot; lower simply takes longer.
-Simulated against a brisk subject — 40° of yaw at 0.15 Hz, detected at 12 Hz —
-the follower cuts peak acceleration about fourfold versus the plain first-order
-lag it replaced. That costs tracking lag, and this is where the setting is
-felt: a mean of 8.2° behind the subject at 10, against 4.2° at 20.
-Raise it if the head visibly trails things you care about.
+Against that same subject at 10, the follower cut peak acceleration about
+fourfold versus the plain first-order lag it replaced, and lower settings cut
+it further. That costs tracking lag, and this is where the setting is felt:
+at 5 the head's top speed of 13°/s is below the subject's peak of 38°/s, so it
+trails by 22° on average, against 10° at 10 and 4° at 20. Past 20 the lag is set
+by the detection rate, not the follower. Raise it if the head visibly trails
+things you care about.
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
 are constructor arguments on `TargetSelector` in `tracker/tracking.py`.
