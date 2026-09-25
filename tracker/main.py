@@ -46,7 +46,7 @@ SCAN_DEGREES = 60.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 LOCK_TIMEOUT = 15.0  # seconds on one target before breaking off to scan for others
-LOOK_AWAY = 4.0  # seconds steering clear of the abandoned target while scanning
+LOOK_AWAY = 10.0  # seconds steering clear of the abandoned target while scanning
 STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 

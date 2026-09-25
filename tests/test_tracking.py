@@ -109,6 +109,19 @@ class TestBoredom:
         assert sel.select([cat], W, H) is None, "the sole target is passed over"
         assert not sel.has_target and sel.looking_away
 
+    def test_keeps_avoiding_the_target_as_it_drifts(self):
+        # The abandoned target moves across the frame (the head is scanning);
+        # a fixed avoid point would slide off it and let it snap back.
+        clock = Clock()
+        sel = self.selector(clock)
+        sel.select([box(100, 240)], W, H)  # lock at the far left
+
+        clock.t = 10.0
+        for cx in range(100, 560, 30):
+            clock.t += 0.1
+            assert sel.select([box(cx, 240)], W, H) is None, f"snapped back at {cx}"
+        assert sel.looking_away
+
     def test_looks_at_a_different_object_when_bored(self):
         clock = Clock()
         sel = self.selector(clock)

@@ -112,8 +112,9 @@ class TargetSelector:
 
     `max_lock` is the boredom timer: hold one target that long and the lock is
     dropped so the scan can look for others. For `look_away` seconds after that,
-    a detection near where the abandoned one sat is passed over, so the head
-    turns to something else rather than snapping straight back.
+    the abandoned target is passed over — tracked as it drifts so it keeps being
+    skipped, not just where it sat — so the head turns to something else rather
+    than snapping straight back.
     """
 
     def __init__(
@@ -167,10 +168,24 @@ class TargetSelector:
             return None
 
         if self._avoid is not None and now < self._avoid_until:
-            dets = [d for d in dets if self._far_from_avoided(d, width, height)]
-            if not dets:
+            # Keep the avoid point on the abandoned target as it (or the head)
+            # moves, so it stays excluded for the whole window rather than
+            # sliding out of range within a frame or two and being re-grabbed.
+            r2 = self._avoid_radius**2
+            keep, nearest, nearest_d2 = [], None, r2
+            for d in dets:
+                c = norm_center(d, width, height)
+                d2 = _dist2(c, self._avoid)
+                if d2 > r2:
+                    keep.append(d)
+                elif d2 <= nearest_d2:
+                    nearest, nearest_d2 = c, d2
+            if nearest is not None:
+                self._avoid = nearest
+            if not keep:
                 self._miss()
                 return None
+            dets = keep
 
         best = min(self._rank(det.label) for det in dets)
         self._better = self._better + 1 if best < self._rank(self._label) else 0
@@ -199,12 +214,6 @@ class TargetSelector:
         self._misses = 0
         self._better = 0
         return det
-
-    def _far_from_avoided(self, det: Detection, width: int, height: int) -> bool:
-        assert self._avoid is not None
-        return (
-            _dist2(norm_center(det, width, height), self._avoid) > self._avoid_radius**2
-        )
 
     def _rank(self, label: str | None) -> int:
         """Lower is preferred; anything unlisted comes last."""
