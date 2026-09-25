@@ -44,7 +44,7 @@ function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
         "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
-        "badge-fps", "marker", "error",
+        "badge-fps", "marker", "error", "aim", "targets",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
