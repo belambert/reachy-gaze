@@ -97,8 +97,8 @@ head looks where it was and finds nothing, so something that has moved on
 lingers until it ages out.
 
 The panel shows the world as a table under the aim readout, newest first: each
-object's type, its bearing (e.g. "30° left and 5° down"), and how long ago it was
-seen and watched. The row the head is locked onto is highlighted. `/state`
+object's type, its bearing as arrows (e.g. "←30° ↓5°" for 30° left and 5° down),
+and how long ago it was seen and watched. The row the head is locked onto is highlighted. `/state`
 returns it as `world`, with each object's `id`, `label`, `direction`,
 `yaw`/`pitch` in degrees, `age` and `dwelt_ago` in seconds (`dwelt_ago` is null
 if it has never been the target), and `target`.
@@ -178,8 +178,8 @@ other box alongside it in a second colour, each labelled with its type. Dashed
 rings mark every 10° off the camera's axis, so a position in frame reads as an
 angle. They come from the camera's focal length (radius f·tan θ) and ignore lens
 distortion, so they are approximate toward the edges. Below
-that it reads out where the head is aimed, in plain terms — e.g. "Aimed 20° left
-and 5° up" — with left/right the yaw and up/down the pitch. This is the absolute
+that it reads out where the head is aimed — e.g. "Aimed ←20° ↑5°" for 20° left
+and 5° up — with ←/→ the yaw and ↑/↓ the pitch. This is the absolute
 aim in the world: the head pose comes back from forward kinematics over all the
 joints, so the body's turntable yaw is already folded in.
 

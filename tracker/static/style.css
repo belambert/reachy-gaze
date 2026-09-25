@@ -151,13 +151,13 @@ code {
 .world td {
     padding: 4px 6px;
     border-bottom: 1px solid var(--line);
+    white-space: nowrap;
 }
 
 /* Ages right-aligned so the digits line up. */
 .world th:nth-child(n + 3),
 .world td:nth-child(n + 3) {
     text-align: right;
-    white-space: nowrap;
 }
 
 /* The object the head is locked onto. */

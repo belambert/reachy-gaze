@@ -184,10 +184,21 @@ const tests = {
         await sleep(400);
         const rows = h.els.world.options;
         assert.deepEqual(rows.map((r) => r.options.map((c) => c.textContent)), [
-            ["🐱 cat", "30° left and 5° down", "0s ago", "0s ago"],
-            ["🧍 person", "12° right", "42s ago", "–"],
+            ["🐱 cat", "←30° ↓5°", "0s ago", "0s ago"],
+            ["🧍 person", "→12°", "42s ago", "–"],
         ]);
         assert.deepEqual(rows.map((r) => r.className), ["target-row", ""]);
+    },
+
+    async "the aim readout uses the same arrows"() {
+        const h = harness(SOURCE);
+        h.app.aim = { yaw: -20.4, pitch: 5 };
+        await sleep(400);
+        assert.equal(h.els.aim.textContent, "Aimed →20° ↑5°.");
+
+        h.app.aim = { yaw: 0.3, pitch: -0.2 };
+        await sleep(400);
+        assert.equal(h.els.aim.textContent, "Aimed straight ahead.");
     },
 
     async "an empty world says so"() {

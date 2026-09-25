@@ -126,15 +126,15 @@ function aimText(aim) {
     return aim ? `Aimed ${bearing(aim)}.` : "";
 }
 
-// A world direction in words, e.g. "20° left and 5° up".
+// A world direction as arrows, e.g. "←20° ↑5°" for 20° left and 5° up.
 function bearing({ yaw, pitch }) {
     yaw = Math.round(yaw);
     pitch = Math.round(pitch);
     if (!yaw && !pitch) return "straight ahead";
-    const words = [];
-    if (yaw) words.push(`${Math.abs(yaw)}° ${yaw > 0 ? "left" : "right"}`);
-    if (pitch) words.push(`${Math.abs(pitch)}° ${pitch > 0 ? "up" : "down"}`);
-    return words.join(" and ");
+    const parts = [];
+    if (yaw) parts.push(`${yaw > 0 ? "←" : "→"}${Math.abs(yaw)}°`);
+    if (pitch) parts.push(`${pitch > 0 ? "↑" : "↓"}${Math.abs(pitch)}°`);
+    return parts.join(" ");
 }
 
 // Counts down to the head tiring of its target; once it has, says so until
