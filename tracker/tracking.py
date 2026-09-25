@@ -7,6 +7,7 @@ smooth its center before it reaches the control loop.
 
 from __future__ import annotations
 
+import math
 import time
 from typing import Callable
 
@@ -112,9 +113,11 @@ class TargetSelector:
 
     `max_lock` is the boredom timer: hold one target that long and the lock is
     dropped so the scan can look for others. For `look_away` seconds after that,
-    the abandoned target is passed over — tracked as it drifts so it keeps being
-    skipped, not just where it sat — so the head turns to something else rather
-    than snapping straight back.
+    the abandoned target is passed over — by its world bearing, so the head
+    turning cannot slide the block off it — and the head turns to something else
+    rather than snapping straight back. Avoidance needs the per-detection
+    `bearings` passed to `select`; without them the lock is still dropped, but
+    nothing is steered clear of.
     """
 
     def __init__(
@@ -126,7 +129,7 @@ class TargetSelector:
         upgrade_after: int = 3,
         max_lock: float | None = None,
         look_away: float = 4.0,
-        avoid_radius: float = 0.35,
+        avoid_angle: float = math.radians(20.0),
         time_fn: Callable[[], float] = time.monotonic,
     ) -> None:
         """Create a selector with the given preference and association gates."""
@@ -137,55 +140,64 @@ class TargetSelector:
         self._upgrade_after = upgrade_after
         self._max_lock = max_lock
         self._look_away = look_away
-        self._avoid_radius = avoid_radius
+        self._avoid_angle = avoid_angle
         self._time = time_fn
         self._center: tuple[float, float] | None = None
         self._label: str | None = None
         self._misses = 0
         self._better = 0
         self._locked_at: float | None = None
-        self._avoid: tuple[float, float] | None = None
+        self._locked_yaw: float | None = None
+        self._avoid_yaw: float | None = None
         self._avoid_until = 0.0
 
     def select(
-        self, dets: list[Detection], width: int, height: int
+        self,
+        dets: list[Detection],
+        width: int,
+        height: int,
+        bearings: list[float] | None = None,
     ) -> Detection | None:
-        """Pick the detection to aim at, or None when none is plausible."""
+        """Pick the detection to aim at, or None when none is plausible.
+
+        `bearings` is the world yaw of each detection, parallel to `dets`; it is
+        only used to steer clear of a target we grew bored of.
+        """
         now = self._time()
 
-        # Bored of a target held too long: drop it and steer clear of it for a
-        # moment, so the scan turns up something else instead of re-grabbing it.
+        # Bored of a target held too long: drop it and steer clear of the
+        # direction it was in, so the scan turns up something else instead.
         if (
             self._max_lock is not None
             and self._locked_at is not None
             and now - self._locked_at >= self._max_lock
         ):
-            self._avoid, self._avoid_until = self._center, now + self._look_away
-            self._center = self._label = self._locked_at = None
+            self._avoid_yaw, self._avoid_until = self._locked_yaw, now + self._look_away
+            self._center = self._label = self._locked_at = self._locked_yaw = None
 
         if not dets:
             self._miss()
             return None
 
-        if self._avoid is not None and now < self._avoid_until:
-            # Keep the avoid point on the abandoned target as it (or the head)
-            # moves, so it stays excluded for the whole window rather than
-            # sliding out of range within a frame or two and being re-grabbed.
-            r2 = self._avoid_radius**2
-            keep, nearest, nearest_d2 = [], None, r2
-            for d in dets:
-                c = norm_center(d, width, height)
-                d2 = _dist2(c, self._avoid)
-                if d2 > r2:
+        if self._avoid_yaw is not None and now < self._avoid_until and bearings:
+            # Follow the abandoned target's bearing as it moves, so it stays
+            # excluded for the whole window. World yaw, not pixels: the head is
+            # scanning, so the target's image position slides while its bearing
+            # barely does.
+            keep, keep_b, nearest_gap, nearest_yaw = [], [], self._avoid_angle, None
+            for d, b in zip(dets, bearings):
+                gap = abs(_ang_diff(b, self._avoid_yaw))
+                if gap > self._avoid_angle:
                     keep.append(d)
-                elif d2 <= nearest_d2:
-                    nearest, nearest_d2 = c, d2
-            if nearest is not None:
-                self._avoid = nearest
+                    keep_b.append(b)
+                elif gap <= nearest_gap:
+                    nearest_gap, nearest_yaw = gap, b
+            if nearest_yaw is not None:
+                self._avoid_yaw = nearest_yaw
             if not keep:
                 self._miss()
                 return None
-            dets = keep
+            dets, bearings = keep, keep_b
 
         best = min(self._rank(det.label) for det in dets)
         self._better = self._better + 1 if best < self._rank(self._label) else 0
@@ -208,9 +220,10 @@ class TargetSelector:
 
         if acquiring:  # a fresh lock restarts the boredom timer and ends look-away
             self._locked_at = now
-            self._avoid = None
+            self._avoid_yaw = None
         self._center = norm_center(det, width, height)
         self._label = det.label
+        self._locked_yaw = _bearing_of(det, dets, bearings) if bearings else None
         self._misses = 0
         self._better = 0
         return det
@@ -235,7 +248,7 @@ class TargetSelector:
     @property
     def looking_away(self) -> bool:
         """Whether we just dropped a target out of boredom and are avoiding it."""
-        return self._avoid is not None and self._time() < self._avoid_until
+        return self._avoid_yaw is not None and self._time() < self._avoid_until
 
     @property
     def label(self) -> str | None:
@@ -249,7 +262,8 @@ class TargetSelector:
         self._misses = 0
         self._better = 0
         self._locked_at = None
-        self._avoid = None
+        self._locked_yaw = None
+        self._avoid_yaw = None
 
 
 class CenterFilter:
@@ -292,3 +306,16 @@ class CenterFilter:
 
 def _dist2(a: tuple[float, float], b: tuple[float, float]) -> float:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
+def _ang_diff(a: float, b: float) -> float:
+    """Signed a - b wrapped to [-pi, pi], so the yaw wrap never fakes distance."""
+    return (a - b + math.pi) % (2 * math.pi) - math.pi
+
+
+def _bearing_of(det: Detection, dets: list[Detection], bearings: list[float]) -> float:
+    """The bearing paired with `det` in the parallel `dets`/`bearings` lists."""
+    for d, b in zip(dets, bearings):
+        if d is det:
+            return b
+    raise ValueError("detection not in list")

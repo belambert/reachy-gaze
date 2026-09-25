@@ -315,7 +315,10 @@ class Tracker(ReachyMiniApp):
                 continue
 
             height, width = frame.shape[:2]
-            det = selector.select(dets, width, height)
+            # World bearing of each box, so the selector can shun a target it
+            # tired of by direction rather than by a pixel that the scan moves.
+            bearings = [self._bearing(d, K, D, head_pose, T_head_cam) for d in dets]
+            det = selector.select(dets, width, height, bearings)
             if det is None and not selector.has_target:
                 smoother.reset()
 
@@ -354,6 +357,13 @@ class Tracker(ReachyMiniApp):
             elapsed = time.monotonic() - started
             if elapsed < period:
                 stop_event.wait(period - elapsed)
+
+    @staticmethod
+    def _bearing(det, K, D, head_pose, T_head_cam) -> float:
+        """World yaw of a detection: where the head would turn to face it."""
+        u, v = det.center
+        pose = look_at_image_pose(u, v, K, D, head_pose, T_head_cam)
+        return float(Rotation.from_matrix(pose[:3, :3]).as_euler("ZYX")[0])
 
     @staticmethod
     def _check_vocabulary(detector: Detector) -> None:

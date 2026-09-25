@@ -57,10 +57,11 @@ run backwards: once on the cat, a person cannot take it back.
 
 It also does not fixate forever. After `LOCK_TIMEOUT` seconds on one target the
 lock is dropped and the head starts scanning again to see what else is around;
-for `LOOK_AWAY` seconds afterwards the abandoned target is passed over — tracked
-as it drifts, so it keeps being skipped even as it or the head moves, rather
-than sliding out of range and being grabbed straight back. When nothing else
-turns up, that same target is re-acquired once the look-away window lapses.
+for `LOOK_AWAY` seconds afterwards the abandoned target is passed over. It is
+shunned by its **world bearing**, not its position in frame, so the scanning
+head cannot slide the block off it — where a pixel-space avoid point would drift
+out of range in a frame or two and let the target be grabbed straight back. When
+nothing else turns up, that same target is re-acquired once the window lapses.
 
 When detections stop, the head keeps its aim on the last known position for
 `LOST_AFTER` seconds before it starts scanning the room — 60° either side of
