@@ -315,10 +315,10 @@ class Tracker(ReachyMiniApp):
                 continue
 
             height, width = frame.shape[:2]
-            # World bearing of each box, so the selector can shun a target it
-            # tired of by direction rather than by a pixel that the scan moves.
-            bearings = [self._bearing(d, K, D, head_pose, T_head_cam) for d in dets]
-            det = selector.select(dets, width, height, bearings)
+            # World direction of each box, so the selector can shun a target it
+            # tired of by where it is rather than by a pixel the scan moves.
+            dirs = [self._direction(d, K, D, head_pose, T_head_cam) for d in dets]
+            det = selector.select(dets, width, height, dirs)
             if det is None and not selector.has_target:
                 smoother.reset()
 
@@ -359,11 +359,17 @@ class Tracker(ReachyMiniApp):
                 stop_event.wait(period - elapsed)
 
     @staticmethod
-    def _bearing(det, K, D, head_pose, T_head_cam) -> float:
-        """World yaw of a detection: where the head would turn to face it."""
+    def _direction(det, K, D, head_pose, T_head_cam) -> tuple[float, float, float]:
+        """Unit world direction to a detection: where the head would face it.
+
+        The look-at pose's forward axis (its rotation's first column) is that
+        direction; carried as a full vector, two targets at the same yaw but
+        different height stay distinct.
+        """
         u, v = det.center
         pose = look_at_image_pose(u, v, K, D, head_pose, T_head_cam)
-        return float(Rotation.from_matrix(pose[:3, :3]).as_euler("ZYX")[0])
+        fwd = pose[:3, 0]
+        return (float(fwd[0]), float(fwd[1]), float(fwd[2]))
 
     @staticmethod
     def _check_vocabulary(detector: Detector) -> None:

@@ -17,6 +17,10 @@ from scipy.spatial.transform import Rotation
 
 from tracker.detector import Detection
 
+# A unit direction in the world frame, used to avoid a bored-of target by where
+# it is rather than where it lands in frame.
+Vec3 = tuple[float, float, float]
+
 
 def norm_center(det: Detection, width: int, height: int) -> tuple[float, float]:
     """Box center normalized to [-1, 1] on both axes."""
@@ -113,10 +117,10 @@ class TargetSelector:
 
     `max_lock` is the boredom timer: hold one target that long and the lock is
     dropped so the scan can look for others. For `look_away` seconds after that,
-    the abandoned target is passed over — by its world bearing, so the head
+    the abandoned target is passed over — by its world direction, so the head
     turning cannot slide the block off it — and the head turns to something else
     rather than snapping straight back. Avoidance needs the per-detection
-    `bearings` passed to `select`; without them the lock is still dropped, but
+    `directions` passed to `select`; without them the lock is still dropped, but
     nothing is steered clear of.
     """
 
@@ -147,8 +151,8 @@ class TargetSelector:
         self._misses = 0
         self._better = 0
         self._locked_at: float | None = None
-        self._locked_yaw: float | None = None
-        self._avoid_yaw: float | None = None
+        self._locked_dir: Vec3 | None = None
+        self._avoid_dir: Vec3 | None = None
         self._avoid_until = 0.0
 
     def select(
@@ -156,12 +160,13 @@ class TargetSelector:
         dets: list[Detection],
         width: int,
         height: int,
-        bearings: list[float] | None = None,
+        directions: list[Vec3] | None = None,
     ) -> Detection | None:
         """Pick the detection to aim at, or None when none is plausible.
 
-        `bearings` is the world yaw of each detection, parallel to `dets`; it is
-        only used to steer clear of a target we grew bored of.
+        `directions` is the world look direction (a unit vector) of each
+        detection, parallel to `dets`; it is only used to steer clear of a
+        target we grew bored of.
         """
         now = self._time()
 
@@ -172,32 +177,32 @@ class TargetSelector:
             and self._locked_at is not None
             and now - self._locked_at >= self._max_lock
         ):
-            self._avoid_yaw, self._avoid_until = self._locked_yaw, now + self._look_away
-            self._center = self._label = self._locked_at = self._locked_yaw = None
+            self._avoid_dir, self._avoid_until = self._locked_dir, now + self._look_away
+            self._center = self._label = self._locked_at = self._locked_dir = None
 
         if not dets:
             self._miss()
             return None
 
-        if self._avoid_yaw is not None and now < self._avoid_until and bearings:
-            # Follow the abandoned target's bearing as it moves, so it stays
-            # excluded for the whole window. World yaw, not pixels: the head is
-            # scanning, so the target's image position slides while its bearing
+        if self._avoid_dir is not None and now < self._avoid_until and directions:
+            # Follow the abandoned target's direction as it moves, so it stays
+            # excluded for the whole window. World direction, not pixels: the
+            # head is scanning, so the image position slides while the direction
             # barely does.
-            keep, keep_b, nearest_gap, nearest_yaw = [], [], self._avoid_angle, None
-            for d, b in zip(dets, bearings):
-                gap = abs(_ang_diff(b, self._avoid_yaw))
+            keep, keep_d, nearest_gap, nearest_dir = [], [], self._avoid_angle, None
+            for d, vec in zip(dets, directions):
+                gap = _angle_between(vec, self._avoid_dir)
                 if gap > self._avoid_angle:
                     keep.append(d)
-                    keep_b.append(b)
+                    keep_d.append(vec)
                 elif gap <= nearest_gap:
-                    nearest_gap, nearest_yaw = gap, b
-            if nearest_yaw is not None:
-                self._avoid_yaw = nearest_yaw
+                    nearest_gap, nearest_dir = gap, vec
+            if nearest_dir is not None:
+                self._avoid_dir = nearest_dir
             if not keep:
                 self._miss()
                 return None
-            dets, bearings = keep, keep_b
+            dets, directions = keep, keep_d
 
         best = min(self._rank(det.label) for det in dets)
         self._better = self._better + 1 if best < self._rank(self._label) else 0
@@ -220,10 +225,10 @@ class TargetSelector:
 
         if acquiring:  # a fresh lock restarts the boredom timer and ends look-away
             self._locked_at = now
-            self._avoid_yaw = None
+            self._avoid_dir = None
         self._center = norm_center(det, width, height)
         self._label = det.label
-        self._locked_yaw = _bearing_of(det, dets, bearings) if bearings else None
+        self._locked_dir = _direction_of(det, dets, directions) if directions else None
         self._misses = 0
         self._better = 0
         return det
@@ -248,7 +253,7 @@ class TargetSelector:
     @property
     def looking_away(self) -> bool:
         """Whether we just dropped a target out of boredom and are avoiding it."""
-        return self._avoid_yaw is not None and self._time() < self._avoid_until
+        return self._avoid_dir is not None and self._time() < self._avoid_until
 
     @property
     def label(self) -> str | None:
@@ -262,8 +267,8 @@ class TargetSelector:
         self._misses = 0
         self._better = 0
         self._locked_at = None
-        self._locked_yaw = None
-        self._avoid_yaw = None
+        self._locked_dir = None
+        self._avoid_dir = None
 
 
 class CenterFilter:
@@ -308,14 +313,15 @@ def _dist2(a: tuple[float, float], b: tuple[float, float]) -> float:
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
 
-def _ang_diff(a: float, b: float) -> float:
-    """Signed a - b wrapped to [-pi, pi], so the yaw wrap never fakes distance."""
-    return (a - b + math.pi) % (2 * math.pi) - math.pi
+def _angle_between(a: Vec3, b: Vec3) -> float:
+    """Angle in radians between two unit direction vectors."""
+    dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    return math.acos(max(-1.0, min(1.0, dot)))
 
 
-def _bearing_of(det: Detection, dets: list[Detection], bearings: list[float]) -> float:
-    """The bearing paired with `det` in the parallel `dets`/`bearings` lists."""
-    for d, b in zip(dets, bearings):
+def _direction_of(det: Detection, dets: list[Detection], dirs: list[Vec3]) -> Vec3:
+    """The direction paired with `det` in the parallel `dets`/`dirs` lists."""
+    for d, vec in zip(dets, dirs):
         if d is det:
-            return b
+            return vec
     raise ValueError("detection not in list")

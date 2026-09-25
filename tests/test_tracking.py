@@ -22,6 +22,11 @@ def box(cx, cy, size=100, label="cat", conf=0.9):
     return Detection(label, conf, (cx - half, cy - half, cx + half, cy + half))
 
 
+def direction(yaw):
+    """A unit look direction at `yaw`, as main._direction hands the selector."""
+    return (math.cos(yaw), math.sin(yaw), 0.0)
+
+
 class TestSelector:
     def test_acquires_largest(self):
         small, large = box(100, 100, size=40), box(500, 300, size=200)
@@ -77,8 +82,9 @@ class Clock:
 class TestBoredom:
     """Holding one target too long must break the lock so the head scans again.
 
-    Avoidance is by world bearing (radians), which the caller supplies per box;
-    the tests pass those directly rather than deriving them from a head pose.
+    Avoidance is by world direction (a unit vector), which the caller supplies
+    per box; the tests pass those directly rather than deriving them from a
+    head pose.
     """
 
     def selector(self, clock, **kw):
@@ -98,59 +104,74 @@ class TestBoredom:
         clock = Clock()
         sel = self.selector(clock)
         cat = box(320, 240, size=150)
-        sel.select([cat], W, H, [0.0])
+        sel.select([cat], W, H, [direction(0.0)])
 
         clock.t = 9.9
-        assert sel.select([cat], W, H, [0.0]) is cat
+        assert sel.select([cat], W, H, [direction(0.0)]) is cat
         assert sel.has_target and not sel.looking_away
 
     def test_drops_the_lock_once_bored(self):
         clock = Clock()
         sel = self.selector(clock)
         cat = box(320, 240, size=150)
-        sel.select([cat], W, H, [0.0])
+        sel.select([cat], W, H, [direction(0.0)])
 
         clock.t = 10.0
-        assert sel.select([cat], W, H, [0.0]) is None, "the sole target is passed over"
+        picked = sel.select([cat], W, H, [direction(0.0)])
+        assert picked is None, "the sole target is passed over"
         assert not sel.has_target and sel.looking_away
 
     def test_keeps_avoiding_the_target_as_it_drifts(self):
         # The head is scanning, so the abandoned target slides across the frame
-        # while its world bearing barely moves. Avoiding by bearing, its image
-        # position is irrelevant: it stays skipped however far it drifts.
+        # while its world direction barely moves. Avoiding by direction, its
+        # image position is irrelevant: it stays skipped however far it drifts.
         clock = Clock()
         sel = self.selector(clock)
-        sel.select([box(100, 240)], W, H, [-0.6])  # bearing off to one side
+        sel.select([box(100, 240)], W, H, [direction(-0.6)])  # off to one side
 
         clock.t = 10.0
         for cx in range(100, 620, 30):
             clock.t += 0.1
-            picked = sel.select([box(cx, 240)], W, H, [-0.6])
+            picked = sel.select([box(cx, 240)], W, H, [direction(-0.6)])
             assert picked is None, f"snapped back at {cx}"
         assert sel.looking_away
+
+    def test_a_target_at_the_same_yaw_but_different_height_is_distinct(self):
+        # Two subjects on the same bearing, one above the other: getting bored
+        # of the low one must still leave the high one takeable — a scalar yaw
+        # would have shunned both.
+        clock = Clock()
+        sel = self.selector(clock)
+        low, high = box(320, 400, size=150), box(320, 80, size=150)
+        # Same yaw (forward along x), one tilted down and one up; unit vectors.
+        dirs = [(0.894, 0.0, -0.447), (0.894, 0.0, 0.447)]
+        sel.select([low, high], W, H, dirs)  # locks the first, `low`
+
+        clock.t = 10.0
+        assert sel.select([low, high], W, H, dirs) is high
 
     def test_looks_at_a_different_object_when_bored(self):
         clock = Clock()
         sel = self.selector(clock)
         here, there = box(100, 240, size=150), box(560, 240, size=150)
-        bearings = [-0.6, 0.6]  # a comfortable angle apart
-        sel.select([here, there], W, H, bearings)  # locks the first, `here`
+        dirs = [direction(-0.6), direction(0.6)]  # a comfortable angle apart
+        sel.select([here, there], W, H, dirs)  # locks the first, `here`
 
         clock.t = 10.0
-        # `here` is shunned by bearing; the only thing left to take is `there`.
-        assert sel.select([here, there], W, H, bearings) is there
+        # `here` is shunned by direction; the only thing left to take is `there`.
+        assert sel.select([here, there], W, H, dirs) is there
 
     def test_returns_to_the_only_target_after_looking_away(self):
         clock = Clock()
         sel = self.selector(clock)
         cat = box(320, 240, size=150)
-        sel.select([cat], W, H, [0.0])
+        sel.select([cat], W, H, [direction(0.0)])
 
         clock.t = 10.0
-        assert sel.select([cat], W, H, [0.0]) is None  # bored, looking away
+        assert sel.select([cat], W, H, [direction(0.0)]) is None  # looking away
 
         clock.t = 14.0  # look-away window has elapsed
-        got = sel.select([cat], W, H, [0.0])
+        got = sel.select([cat], W, H, [direction(0.0)])
         assert got is cat, "comes back when nothing else turns up"
         assert not sel.looking_away
 
@@ -158,13 +179,13 @@ class TestBoredom:
         clock = Clock()
         sel = self.selector(clock)
         here, there = box(100, 240, size=150), box(560, 240, size=150)
-        bearings = [-0.6, 0.6]
-        sel.select([here, there], W, H, bearings)
+        dirs = [direction(-0.6), direction(0.6)]
+        sel.select([here, there], W, H, dirs)
 
         clock.t = 10.0
-        sel.select([here, there], W, H, bearings)  # swings to the other object
+        sel.select([here, there], W, H, dirs)  # swings to the other object
         clock.t = 15.0  # 5s on the new one: not yet bored again
-        assert sel.select([here, there], W, H, bearings) is not None
+        assert sel.select([here, there], W, H, dirs) is not None
         assert sel.has_target
 
 
