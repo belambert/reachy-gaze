@@ -39,7 +39,7 @@ class WorldObject:
     direction: Vec3
     seen_at: float  # monotonic time of the last sighting
     dwelt_at: float | None = None  # last time the head was locked onto it
-    thumb: str | None = None  # JPEG data URI from the latest sighting
+    thumb: str | None = None  # JPEG data URI, taken while the head was locked on
 
 
 class WorldModel:
@@ -66,16 +66,10 @@ class WorldModel:
         self._ids = itertools.count(1)
         self._objects: list[WorldObject] = []
 
-    def observe(
-        self,
-        dets: list[Detection],
-        directions: list[Vec3],
-        thumbs: list[str] | None = None,
-    ) -> list[int]:
+    def observe(self, dets: list[Detection], directions: list[Vec3]) -> list[int]:
         """Record one frame's detections, returning the object id of each.
 
-        `directions` is each detection's world direction and `thumbs` its
-        picture, both parallel to `dets`.
+        `directions` is each detection's world direction, parallel to `dets`.
         """
         now = self._time()
         self._forget(now)
@@ -103,14 +97,20 @@ class WorldModel:
             else:
                 obj = WorldObject(next(self._ids), det.label, vec, now)
                 self._objects.append(obj)
-            if thumbs is not None:
-                obj.thumb = thumbs[i]
             ids.append(obj.id)
         return ids
 
-    def dwell(self, id: int) -> None:
-        """Note that the head is locked onto object `id` right now."""
-        self._by_id(id).dwelt_at = self._time()
+    def dwell(self, id: int, thumb: str | None = None) -> None:
+        """Note that the head is locked onto object `id` right now.
+
+        `thumb` is its picture from this frame. Only pictures taken while locked
+        on are kept: the head is aimed at the object then, so it is centred and
+        steady rather than a blurred box at the edge of a scan.
+        """
+        obj = self._by_id(id)
+        obj.dwelt_at = self._time()
+        if thumb is not None:
+            obj.thumb = thumb
 
     def dwelt_within(self, id: int, seconds: float) -> bool:
         """Whether the head was locked onto object `id` in the last `seconds`."""

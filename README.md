@@ -79,8 +79,8 @@ one while the head waits it out.
 Alongside the one target it aims at, the robot keeps a short-term memory of
 everything it has seen lately (`tracker/world.py`). Each entry holds the
 object's type, its location, when it was last seen, when the head last dwelt on
-it (was locked onto it), and a small picture of it cropped from its latest
-sighting. It keeps every box of every tracked class, not
+it (was locked onto it), and a small picture of it from the last time the head
+was locked onto it. It keeps every box of every tracked class, not
 only the target.
 
 The location is a **unit direction** in the world frame (+X forward, +Y left, +Z
@@ -104,11 +104,13 @@ returns it as `world`, with each object's `id`, `label`, `direction`,
 `yaw`/`pitch` in degrees, `age` and `dwelt_ago` in seconds (`dwelt_ago` is null
 if it has never been the target), `target`, and `thumb`.
 
-The picture is the detection's box, cropped and scaled to fill 48×36 px, then
-shown at half that so it sits on the text's line without making the row any
-taller. It is sent as a JPEG data URI of 1–2 KB, and takes about 0.1 ms per box
-to make on an M4 laptop; the robot's Pi will be slower, but not measured. The emoji stands in for it until the first one
-arrives.
+The picture is taken only while the head is locked onto the object, since it is
+centred and steady then rather than a blurred box at the edge of a scan. Each
+frame's target box is cropped and scaled to fill 48×36 px, then shown at half
+that so it sits on the text's line without making the row any taller. It is
+sent as a JPEG data URI of 1–2 KB, and takes about 0.1 ms to make on an M4
+laptop; the robot's Pi will be slower, but not measured. An object never locked
+onto has no picture, and shows its emoji instead.
 
 A badge alongside the lock counts down to boredom ("bored in 7s") while the head
 holds a target, then reads "bored: avoiding recent targets" until something new

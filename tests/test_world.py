@@ -180,12 +180,29 @@ class TestThumbnail:
         assert img.size == THUMB_SIZE
 
 
-def test_the_latest_picture_is_kept(world):
-    world.observe([det("cat")], [toward(0)], ["data:a"])
-    world.observe([det("cat")], [toward(1)], ["data:b"])
+def test_no_picture_until_locked_on(world):
+    world.observe([det("cat")], [toward(0)])
+    assert world.snapshot()[0]["thumb"] is None
+
+
+def test_the_picture_comes_from_the_latest_lock(world):
+    [id] = world.observe([det("cat")], [toward(0)])
+    world.dwell(id, "data:a")
+    world.observe([det("cat")], [toward(1)])
+    world.dwell(id, "data:b")
     assert world.snapshot()[0]["thumb"] == "data:b"
 
 
-def test_no_picture_until_one_is_given(world):
-    world.observe([det("cat")], [toward(0)])
-    assert world.snapshot()[0]["thumb"] is None
+def test_the_picture_outlasts_the_lock(world):
+    # Seen again, but not locked on: the picture from the lock stays.
+    [id] = world.observe([det("cat")], [toward(0)])
+    world.dwell(id, "data:a")
+    world.observe([det("cat")], [toward(1)])
+    assert world.snapshot()[0]["thumb"] == "data:a"
+
+
+def test_dwelling_without_a_picture_keeps_the_old_one(world):
+    [id] = world.observe([det("cat")], [toward(0)])
+    world.dwell(id, "data:a")
+    world.dwell(id)
+    assert world.snapshot()[0]["thumb"] == "data:a"

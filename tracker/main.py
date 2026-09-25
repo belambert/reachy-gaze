@@ -354,9 +354,8 @@ class Tracker(ReachyMiniApp):
             # World direction of each box, so objects are remembered by where
             # they are rather than by a pixel the head's turning moves.
             dirs = [self._direction(d, K, D, head_pose, T_head_cam) for d in dets]
-            thumbs = [thumbnail(frame, d) for d in dets]
             with state.lock:
-                ids = state.world.observe(dets, dirs, thumbs)
+                ids = state.world.observe(dets, dirs)
                 shunned = [state.world.dwelt_within(i, DWELL_MEMORY) for i in ids]
             det = selector.select(dets, width, height, shunned)
             if det is None and not selector.has_target:
@@ -368,8 +367,8 @@ class Tracker(ReachyMiniApp):
                     if det is not None
                     else None
                 )
-                if state.target_id is not None:
-                    state.world.dwell(state.target_id)
+                if det is not None:
+                    state.world.dwell(state.target_id, thumbnail(frame, det))
                 state.bored_at, state.bored = selector.bored_at, selector.bored
                 state.lens = {
                     "fx": float(K[0, 0]),
