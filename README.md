@@ -240,7 +240,7 @@ Constants live at the top of `tracker/main.py`:
 | `MAX_HEAD_SPEED` | 3.5     | rad/s hard ceiling on commanded rotation                  |
 | `BLEND_TAU`      | 0.4     | Seconds to ease between searching and locked-on posture   |
 | `LOST_AFTER`     | 10.0    | Seconds holding the last aim point before giving up       |
-| `LOCK_TIMEOUT`   | 15.0    | Seconds on one target before breaking off to scan for others |
+| `LOCK_TIMEOUT`   | 30.0    | Seconds on one target before breaking off to scan for others |
 | `STALE_AFTER`    | 5.0     | Seconds before the panel calls a lock held rather than live |
 | `FORGET_AFTER`   | 120.0   | Seconds before an unseen object leaves the world model    |
 | `DWELL_MEMORY`   | 60.0    | Seconds a watched object stays shunned once bored         |
