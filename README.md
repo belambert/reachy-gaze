@@ -135,7 +135,8 @@ change them without editing code; with only the backend set, the address
 defaults to that backend's.
 
 The panel shows whether the detector is reachable, the measured detection rate,
-and where in frame the tracker currently believes the target is.
+and a view of what's in frame: the tracked target as a green disc and every
+other box alongside it in a second colour, each labelled with its type.
 
 What it hunts for is `TRACK_LABELS` in `tracker/main.py` — `cat`, `dog`,
 `bird`, `person`, most preferred first. Any COCO class works there, and

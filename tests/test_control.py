@@ -128,6 +128,20 @@ class TestHoldWindow:
         assert snap["seen_ago"] is None, "no point reporting staleness once given up"
 
 
+class TestOtherTargets:
+    """The panel is told about every box in view, not just the one we track."""
+
+    def test_none_in_view_by_default(self):
+        assert State().snapshot()["targets"] == []
+
+    def test_other_boxes_are_exposed_to_the_panel(self):
+        state = State()
+        state.targets = [{"label": "person", "center": [0.5, -0.2]}]
+        assert state.snapshot()["targets"] == [
+            {"label": "person", "center": [0.5, -0.2]}
+        ]
+
+
 class TestBackendSelection:
     """The detector backend is selectable, and the panel is told the options."""
 

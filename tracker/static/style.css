@@ -8,6 +8,7 @@
     --warn: #e0a83c;
     --bad: #e5604d;
     --accent: #5b9dff;
+    --other: #a78bfa;
 }
 
 * {
@@ -183,15 +184,33 @@ code {
     height: 100%;
 }
 
-.marker {
+/* One disc per box in view, the type shown as an emoji inside it. */
+.marker,
+.target {
     position: absolute;
-    display: none;
-    width: 22px;
-    height: 22px;
-    margin: -11px 0 0 -11px;
-    border: 2px solid var(--ok);
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    margin: -13px 0 0 -13px;
     border-radius: 50%;
+    background: var(--bg);
+    font-size: 15px;
+    line-height: 1;
     transition: left 0.15s linear, top 0.15s linear;
+}
+
+/* The one the head is aimed at; shown by the JS when locked. */
+.marker {
+    display: none;
+    border: 2px solid var(--ok);
+}
+
+/* Also in view, but not the target. */
+.target {
+    display: flex;
+    border: 2px solid var(--other);
+    opacity: 0.85;
 }
 
 .error {

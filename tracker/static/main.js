@@ -1,5 +1,9 @@
 const el = (id) => document.getElementById(id);
 
+// Each tracked class as a glyph for the view; anything else falls back to a dot.
+const EMOJI = { cat: "🐱", dog: "🐶", bird: "🐦", person: "🧍" };
+const emoji = (label) => EMOJI[label] ?? "🎯";
+
 // Mirrors STALE_AFTER in the app. Only affects how the lock badge reads, so a
 // drift between the two costs nothing but wording.
 const STALE_AFTER = 1.0;
@@ -95,14 +99,36 @@ function apply(state) {
 
     const marker = el("marker");
     if (state.center && state.locked) {
-        marker.style.display = "block";
-        marker.style.left = `${((state.center[0] + 1) / 2) * 100}%`;
-        marker.style.top = `${((state.center[1] + 1) / 2) * 100}%`;
+        marker.style.display = "flex";
+        marker.textContent = emoji(state.label);
+        marker.title = state.label;
+        place(marker, state.center);
     } else {
         marker.style.display = "none";
     }
+    renderTargets(state.targets ?? []);
 
     el("error").textContent = state.error || "";
+}
+
+// A marker's position from a center normalized to [-1, 1] on both axes.
+function place(node, [x, y]) {
+    node.style.left = `${((x + 1) / 2) * 100}%`;
+    node.style.top = `${((y + 1) / 2) * 100}%`;
+}
+
+// The other boxes in view: rebuilt each poll, which is plenty at this rate.
+function renderTargets(targets) {
+    el("targets").replaceChildren(
+        ...targets.map(({ label, center }) => {
+            const node = document.createElement("div");
+            node.className = "target";
+            node.textContent = emoji(label);
+            node.title = label;
+            place(node, center);
+            return node;
+        }),
+    );
 }
 
 // "people, cats and dogs" reads better on the card than a bare CSV.

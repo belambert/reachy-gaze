@@ -104,6 +104,9 @@ class State:
         self.error = ""
         self.fps = 0.0
         self.center: tuple[float, float] | None = None
+        # Every other box in view, so the panel can show what the head is
+        # ignoring: {"label", "center": [x, y]} in the same normalized coords.
+        self.targets: list[dict] = []
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -130,6 +133,7 @@ class State:
                 "error": self.error,
                 "fps": round(self.fps, 1),
                 "center": self.center,
+                "targets": self.targets,
                 "seen_ago": round(seen_ago, 1) if locked else None,
             }
 
@@ -286,6 +290,8 @@ class Tracker(ReachyMiniApp):
             if not enabled:
                 selector.reset()
                 smoother.reset()
+                with state.lock:
+                    state.targets = []
                 stop_event.wait(0.2)
                 continue
 
@@ -301,6 +307,7 @@ class Tracker(ReachyMiniApp):
                     state.detector_ok = False
                     state.error = str(e)
                     state.fps = 0.0
+                    state.targets = []
                 logger.warning("Detector unreachable: %s", e)
                 stop_event.wait(RETRY_AFTER)
                 continue
@@ -317,6 +324,13 @@ class Tracker(ReachyMiniApp):
                 state.fps += 0.2 * (
                     1.0 / max(time.monotonic() - started, 1e-3) - state.fps
                 )
+                # Every box but the one we aim at, for the panel to show as the
+                # others in view; the primary is carried by `center` instead.
+                state.targets = [
+                    {"label": d.label, "center": list(norm_center(d, width, height))}
+                    for d in dets
+                    if d is not det
+                ]
                 if det is not None:
                     center = smoother.update(norm_center(det, width, height))
                     u, v = pixel_center(center, width, height)
@@ -409,6 +423,7 @@ class Tracker(ReachyMiniApp):
                 if config.enabled is False:
                     state.goal = None
                     state.center = None
+                    state.targets = []
             return state.snapshot()
 
 
