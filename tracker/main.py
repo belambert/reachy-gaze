@@ -124,6 +124,9 @@ class State:
         self.targets: list[dict] = []
         # What has been seen lately and where, kept while the head looks away.
         self.world = WorldModel(forget_after=FORGET_AFTER)
+        # Camera intrinsics and frame size, so the panel can draw rings of equal
+        # angle off the camera axis; None until the first frame arrives.
+        self.lens: dict | None = None
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -154,6 +157,7 @@ class State:
                 "targets": self.targets,
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
                 "world": self.world.snapshot(),
+                "lens": self.lens,
                 "seen_ago": round(seen_ago, 1) if locked else None,
             }
 
@@ -344,6 +348,14 @@ class Tracker(ReachyMiniApp):
 
             with state.lock:
                 state.world.observe(dets, dirs)
+                state.lens = {
+                    "fx": float(K[0, 0]),
+                    "fy": float(K[1, 1]),
+                    "cx": float(K[0, 2]),
+                    "cy": float(K[1, 2]),
+                    "width": width,
+                    "height": height,
+                }
                 state.detector_ok = True
                 state.error = ""
                 # Measured rate matters more than the cap; the panel shows it.

@@ -201,6 +201,22 @@ code {
     height: 100%;
 }
 
+/* Rings of equal angle off the camera axis, labelled in degrees. */
+.ring {
+    position: absolute;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+}
+
+.ring-label {
+    position: absolute;
+    padding-left: 3px;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1;
+    transform: translateY(-100%);
+}
+
 /* One disc per box in view, the type shown as an emoji inside it. */
 .marker,
 .target {

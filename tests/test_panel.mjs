@@ -44,7 +44,7 @@ function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
         "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
-        "badge-fps", "marker", "error", "aim", "targets", "world",
+        "badge-fps", "marker", "error", "aim", "targets", "world", "view", "rings",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
@@ -185,6 +185,27 @@ const tests = {
             "🐱 cat, 30° left and 5° down, 0s ago",
             "🧍 person, 12° right, 42s ago",
         ]);
+    },
+
+    async "rings are drawn every 10 degrees out to the frame's corners"() {
+        const h = harness(SOURCE);
+        // 90° horizontal FOV on a 640x480 frame: corners sit ~51° off axis.
+        h.app.lens = { fx: 320, fy: 320, cx: 320, cy: 240, width: 640, height: 480 };
+        await sleep(400);
+
+        const labels = h.els.rings.options.filter((n) => n.className === "ring-label");
+        assert.deepEqual(labels.map((n) => n.textContent), ["10°", "20°", "30°", "40°", "50°"]);
+        assert.equal(h.els.view.style.aspectRatio, "640 / 480");
+
+        // At 320 px focal length the 40° ring is 537 px wide, inside the frame.
+        const ring40 = h.els.rings.options.filter((n) => n.className === "ring")[3];
+        assert.ok(parseFloat(ring40.style.width) < 100);
+    },
+
+    async "no lens, no rings"() {
+        const h = harness(SOURCE);
+        await sleep(60);
+        assert.deepEqual(h.els.rings.options, []);
     },
 
     async "a stale poll must not steal what was typed"() {

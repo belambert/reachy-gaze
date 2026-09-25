@@ -163,7 +163,10 @@ defaults to that backend's.
 
 The panel shows whether the detector is reachable, the measured detection rate,
 and a view of what's in frame: the tracked target as a green disc and every
-other box alongside it in a second colour, each labelled with its type. Below
+other box alongside it in a second colour, each labelled with its type. Dashed
+rings mark every 10° off the camera's axis, so a position in frame reads as an
+angle. They come from the camera's focal length (radius f·tan θ) and ignore lens
+distortion, so they are approximate toward the edges. Below
 that it reads out where the head is aimed, in plain terms — e.g. "Aimed 20° left
 and 5° up" — with left/right the yaw and up/down the pitch. This is the absolute
 aim in the world: the head pose comes back from forward kinematics over all the

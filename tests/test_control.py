@@ -158,6 +158,13 @@ class TestWorld:
         assert obj["yaw"] == pytest.approx(90.0)
 
 
+class TestLens:
+    """The panel is told the camera intrinsics once a frame has arrived."""
+
+    def test_unknown_until_a_frame(self):
+        assert State().snapshot()["lens"] is None
+
+
 class TestAim:
     """The panel is told where the head is pointing, in yaw/pitch degrees."""
 

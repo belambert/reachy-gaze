@@ -8,6 +8,9 @@ const emoji = (label) => EMOJI[label] ?? "🎯";
 // drift between the two costs nothing but wording.
 const STALE_AFTER = 1.0;
 
+// Rings of equal angle off the camera axis, this many degrees apart.
+const RING_STEP = 10;
+
 // Responses can arrive out of order — a poll issued before a write can resolve
 // after it — so every request takes a sequence number and an older response is
 // never allowed to paint over a newer one.
@@ -24,6 +27,9 @@ const dirty = new Set();
 // it actually changes.
 let backends = [];
 let backendKeys = "";
+
+// The lens the rings were last drawn for; they only change if it does.
+let lensKey = "";
 
 async function request(path, options, keys = []) {
     const id = ++seq;
@@ -107,6 +113,7 @@ function apply(state) {
         marker.style.display = "none";
     }
     renderTargets(state.targets ?? []);
+    renderRings(state.lens);
     el("aim").textContent = aimText(state.aim);
     renderWorld(state.world ?? []);
 
@@ -158,6 +165,55 @@ function renderTargets(targets) {
             return node;
         }),
     );
+}
+
+// Rings at every RING_STEP degrees off the camera axis, so a position in view
+// reads as a bearing. Pinhole model: the ring at angle θ has radius f·tan θ in
+// pixels. Lens distortion is ignored, so they are approximate toward the edges.
+function renderRings(lens) {
+    const key = JSON.stringify(lens ?? null);
+    if (key === lensKey) return;
+    lensKey = key;
+    if (!lens) {
+        el("rings").replaceChildren();
+        return;
+    }
+
+    const { fx, fy, cx, cy, width, height } = lens;
+    // Match the frame's shape, or the rings (and every marker) are stretched.
+    el("view").style.aspectRatio = `${width} / ${height}`;
+
+    // Same pixel-to-percent mapping as the markers (see norm_center in tracking.py).
+    const px = (u) => `${(u / Math.max(width - 1, 1)) * 100}%`;
+    const py = (v) => `${(v / Math.max(height - 1, 1)) * 100}%`;
+    const corners = [[0, 0], [width, 0], [0, height], [width, height]];
+    const reach = Math.max(
+        ...corners.map(([u, v]) => Math.atan(Math.hypot((u - cx) / fx, (v - cy) / fy))),
+    );
+
+    const nodes = [];
+    for (let deg = RING_STEP; (deg * Math.PI) / 180 < reach; deg += RING_STEP) {
+        const t = Math.tan((deg * Math.PI) / 180);
+        const ring = document.createElement("div");
+        ring.className = "ring";
+        Object.assign(ring.style, {
+            left: px(cx - fx * t),
+            top: py(cy - fy * t),
+            width: px(2 * fx * t),
+            height: py(2 * fy * t),
+        });
+
+        // Labelled where the ring crosses the upper-right diagonal.
+        const label = document.createElement("div");
+        label.className = "ring-label";
+        label.textContent = `${deg}°`;
+        Object.assign(label.style, {
+            left: px(cx + (fx * t) / Math.SQRT2),
+            top: py(cy - (fy * t) / Math.SQRT2),
+        });
+        nodes.push(ring, label);
+    }
+    el("rings").replaceChildren(...nodes);
 }
 
 // "people, cats and dogs" reads better on the card than a bare CSV.
