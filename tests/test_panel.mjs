@@ -216,6 +216,16 @@ const tests = {
         assert.equal(h.els.aim.textContent, "Aimed straight ahead.");
     },
 
+    async "objects avoided while bored are greyed out"() {
+        const h = harness(SOURCE);
+        h.app.world = [
+            { id: 2, label: "cat", yaw: 0, pitch: 0, age: 0, dwelt_ago: 1, avoided: true },
+            { id: 1, label: "dog", yaw: 40, pitch: 0, age: 0, dwelt_ago: null, avoided: false },
+        ];
+        await sleep(400);
+        assert.deepEqual(h.els.world.options.map((r) => r.className), ["avoided", ""]);
+    },
+
     async "an empty world says so"() {
         const h = harness(SOURCE);
         h.app.world = [];

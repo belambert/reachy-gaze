@@ -167,7 +167,9 @@ function renderWorld(objects) {
     const ago = (s) => (s == null ? "–" : `${Math.round(s)}s ago`);
     const rows = objects.map((obj) => {
         const row = document.createElement("tr");
-        row.className = obj.focused ? "focused" : "";
+        row.className = [obj.focused && "focused", obj.avoided && "avoided"]
+            .filter(Boolean)
+            .join(" ");
         row.append(
             objectCell(obj),
             ...[bearing(obj), ago(obj.age), ago(obj.dwelt_ago)].map((text) => {

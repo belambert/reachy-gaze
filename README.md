@@ -115,10 +115,11 @@ object's picture and type, its bearing as arrows (e.g. "←30° ↓5°" for 30°
 and 5° down), then two ages. **Last seen** is how long since it was last
 detected, and **last watched** how long since the head last looked its way.
 Both stay at 0 for as long as it is in focus, and start counting when the head
-looks away. Rows in focus are highlighted. `/state` returns it as `world`, with
-each object's `id`, `label`, `direction`, `yaw`/`pitch` in degrees, `age` and
-`dwelt_ago` in seconds (`dwelt_ago` is null if it has never been watched),
-`focused`, and `thumb`.
+looks away. Rows in focus are highlighted, and rows the head is avoiding while
+bored are greyed out. `/state` returns it as `world`, with each object's `id`,
+`label`, `direction`, `yaw`/`pitch` in degrees, `age` and `dwelt_ago` in seconds
+(`dwelt_ago` is null if it has never been watched), `focused`, `avoided`, and
+`thumb`.
 
 The picture is taken only of the target, on frames it is detected, since it is
 centred and steady then rather than a blurred box at the edge of a scan. The

@@ -172,6 +172,16 @@ code {
     vertical-align: middle;
 }
 
+/* Passed over while the head is bored of it. */
+.world .avoided td {
+    color: var(--muted);
+    opacity: 0.5;
+}
+
+.world .avoided .thumb {
+    filter: grayscale(1);
+}
+
 /* Whatever lies the way the head is looking. */
 .world .focused td {
     color: var(--ok);

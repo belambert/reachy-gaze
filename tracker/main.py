@@ -172,7 +172,17 @@ class State:
                 "center": self.center,
                 "targets": self.targets,
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
-                "world": self.world.snapshot(),
+                # Avoided: what the selector is passing over while bored,
+                # by the same test the vision thread gives it.
+                "world": [
+                    {
+                        **o,
+                        "avoided": self.bored
+                        and o["dwelt_ago"] is not None
+                        and o["dwelt_ago"] <= DWELL_MEMORY,
+                    }
+                    for o in self.world.snapshot()
+                ],
                 "bored": self.bored,
                 "bored_in": (
                     None

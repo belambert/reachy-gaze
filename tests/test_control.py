@@ -211,6 +211,29 @@ class TestBoredom:
         assert flags == {"cat": False, "dog": True}
 
 
+class TestAvoided:
+    """The panel is told which objects the head is passing over while bored."""
+
+    def state(self, bored):
+        from tracker.detector import Detection
+
+        state = State()
+        state.world.observe(
+            [Detection("cat", 0.9, (0, 0, 1, 1)), Detection("dog", 0.9, (0, 0, 1, 1))],
+            [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        )
+        state.world.look((1.0, 0.0, 0.0))  # watched the cat, not the dog
+        state.world.look(None)
+        state.bored = bored
+        return {o["label"]: o["avoided"] for o in state.snapshot()["world"]}
+
+    def test_what_was_watched_is_avoided_while_bored(self):
+        assert self.state(bored=True) == {"cat": True, "dog": False}
+
+    def test_nothing_is_avoided_unless_bored(self):
+        assert self.state(bored=False) == {"cat": False, "dog": False}
+
+
 class TestHeldAim:
     """The direction the head holds, which is what boredom is timed against."""
 
