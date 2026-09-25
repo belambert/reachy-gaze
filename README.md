@@ -198,17 +198,17 @@ Constants live at the top of `tracker/main.py`:
 | `LOCK_TIMEOUT`   | 15.0    | Seconds on one target before breaking off to scan for others |
 | `LOOK_AWAY`      | 10.0    | Seconds steering clear of the abandoned target while scanning |
 | `STALE_AFTER`    | 5.0     | Seconds before the panel calls a lock held rather than live |
-| `SCAN_DEGREES`   | 60.0    | Half-width of the scan                                    |
+| `SCAN_DEGREES`   | 90.0    | Half-width of the scan                                    |
 | `SCAN_HZ`        | 0.04    | Scan rate                                                 |
 
 ### The scan
 
 The scan is a slow side-to-side sweep in yaw only; the head is held level, with
-no up-and-down motion. One cycle takes 25 s and covers **120° of yaw**.
+no up-and-down motion. One cycle takes 25 s and covers **180° of yaw**.
 
-That is the front of the room only. The body's `yaw_body` joint would allow
-±160°, so there is room to widen `SCAN_DEGREES`, but as it stands a subject that
-leaves to the side or behind has to come back into view on its own.
+That reaches 90° to either side. The body's `yaw_body` joint would allow ±160°,
+so there is still room to widen `SCAN_DEGREES`, but as it stands a subject that
+leaves further round or behind has to come back into view on its own.
 
 Each scan is phase-aligned to the head's current yaw, so it picks up from
 wherever the head was holding instead of snapping to centre first. Any pitch
@@ -236,7 +236,7 @@ For comparison, over a full scan cycle starting from rest:
 
 | Motion                          | Peak speed | Peak acceleration |
 | ------------------------------- | ---------- | ----------------- |
-| Scan, 60° yaw                   | 15 °/s     | 65 °/s²           |
+| Scan, 90° yaw                   | 23 °/s     | 97 °/s²           |
 | Tracking a 40° step (pull 10)   | 26 °/s     | 318 °/s²          |
 
 The scan is gentler than ordinary tracking, so if it looks unsteady on hardware

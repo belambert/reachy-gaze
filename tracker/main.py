@@ -42,7 +42,7 @@ MAX_HEAD_PULL = 10.0  # rad/s^2 ceiling on the follower's pull; lower is gentler
 BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 # The body's yaw joint allows +/-160 degrees; this keeps the scan to the front
 # of the robot, well inside that.
-SCAN_DEGREES = 60.0  # half-width of the yaw scan
+SCAN_DEGREES = 90.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 LOCK_TIMEOUT = 15.0  # seconds on one target before breaking off to scan for others
