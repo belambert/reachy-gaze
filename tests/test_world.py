@@ -1,9 +1,13 @@
+import base64
+import io
 import math
 
+import numpy as np
 import pytest
+from PIL import Image
 
 from tracker.detector import Detection
-from tracker.world import WorldModel, yaw_pitch
+from tracker.world import THUMB_SIZE, WorldModel, thumbnail, yaw_pitch
 
 
 def det(label):
@@ -148,3 +152,40 @@ class TestDwell:
         world.dwell(cat)
         assert world.dwelt_within(cat, 60.0)
         assert not world.dwelt_within(dog, 60.0)
+
+
+class TestThumbnail:
+    def decode(self, uri):
+        assert uri.startswith("data:image/jpeg;base64,")
+        return Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
+
+    @pytest.mark.parametrize(
+        "box", [(10, 10, 110, 60), (200, 0, 240, 470), (600, 400, 900, 900)]
+    )
+    def test_every_box_shape_gives_the_same_size(self, box):
+        frame = np.zeros((480, 640, 3), np.uint8)
+        img = self.decode(thumbnail(frame, Detection("cat", 0.9, box)))
+        assert img.size == THUMB_SIZE
+
+    def test_crops_the_box_not_the_frame(self):
+        frame = np.zeros((480, 640, 3), np.uint8)
+        frame[100:200, 300:400] = (0, 0, 255)  # a red square, in BGR
+        img = self.decode(thumbnail(frame, Detection("cat", 0.9, (300, 100, 400, 200))))
+        r, g, b = img.convert("RGB").getpixel((24, 18))
+        assert r > 200 and g < 60 and b < 60, "colour channels come out as RGB"
+
+    def test_a_degenerate_box_does_not_crash(self):
+        frame = np.zeros((480, 640, 3), np.uint8)
+        img = self.decode(thumbnail(frame, Detection("cat", 0.9, (50, 50, 50, 50))))
+        assert img.size == THUMB_SIZE
+
+
+def test_the_latest_picture_is_kept(world):
+    world.observe([det("cat")], [toward(0)], ["data:a"])
+    world.observe([det("cat")], [toward(1)], ["data:b"])
+    assert world.snapshot()[0]["thumb"] == "data:b"
+
+
+def test_no_picture_until_one_is_given(world):
+    world.observe([det("cat")], [toward(0)])
+    assert world.snapshot()[0]["thumb"] is None

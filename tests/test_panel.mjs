@@ -183,11 +183,26 @@ const tests = {
         ];
         await sleep(400);
         const rows = h.els.world.options;
-        assert.deepEqual(rows.map((r) => r.options.map((c) => c.textContent)), [
-            ["🐱 cat", "←30° ↓5°", "0s ago", "0s ago"],
-            ["🧍 person", "→12°", "42s ago", "–"],
+        assert.deepEqual(rows.map((r) => r.options.slice(1).map((c) => c.textContent)), [
+            ["←30° ↓5°", "0s ago", "0s ago"],
+            ["→12°", "42s ago", "–"],
         ]);
+        assert.deepEqual(rows.map((r) => r.options[0].options.at(-1)), [" cat", " person"]);
         assert.deepEqual(rows.map((r) => r.className), ["target-row", ""]);
+    },
+
+    async "each object shows its picture, or its emoji until it has one"() {
+        const h = harness(SOURCE);
+        h.app.world = [
+            { id: 2, label: "cat", yaw: 0, pitch: 0, age: 0, dwelt_ago: null, thumb: "data:image/jpeg;base64,AAA" },
+            { id: 1, label: "dog", yaw: 0, pitch: 0, age: 0, dwelt_ago: null, thumb: null },
+        ];
+        await sleep(400);
+        const [cat, dog] = h.els.world.options.map((r) => r.options[0].options[0]);
+        assert.equal(cat.id, "img");
+        assert.equal(cat.src, "data:image/jpeg;base64,AAA");
+        assert.equal(dog.id, "span");
+        assert.equal(dog.textContent, "🐶");
     },
 
     async "the aim readout uses the same arrows"() {

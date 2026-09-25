@@ -146,6 +146,22 @@ function boredom({ bored, bored_in }) {
     else if (bored_in != null) badge("badge-bored", "", `bored in ${Math.ceil(bored_in)}s`);
 }
 
+// The object's picture from its latest sighting, then its type; the emoji
+// stands in until there is a picture.
+function objectCell({ label, thumb }) {
+    const cell = document.createElement("td");
+    const pic = document.createElement(thumb ? "img" : "span");
+    pic.className = "thumb";
+    if (thumb) {
+        pic.src = thumb;
+        pic.alt = label;
+    } else {
+        pic.textContent = emoji(label);
+    }
+    cell.append(pic, ` ${label}`);
+    return cell;
+}
+
 // The world model as a table, newest first, the current target highlighted.
 function renderWorld(objects) {
     const ago = (s) => (s == null ? "–" : `${Math.round(s)}s ago`);
@@ -153,13 +169,12 @@ function renderWorld(objects) {
         const row = document.createElement("tr");
         row.className = obj.target ? "target-row" : "";
         row.append(
-            ...[`${emoji(obj.label)} ${obj.label}`, bearing(obj), ago(obj.age), ago(obj.dwelt_ago)].map(
-                (text) => {
-                    const cell = document.createElement("td");
-                    cell.textContent = text;
-                    return cell;
-                },
-            ),
+            objectCell(obj),
+            ...[bearing(obj), ago(obj.age), ago(obj.dwelt_ago)].map((text) => {
+                const cell = document.createElement("td");
+                cell.textContent = text;
+                return cell;
+            }),
         );
         return row;
     });

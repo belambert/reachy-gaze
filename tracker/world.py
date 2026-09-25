@@ -8,16 +8,26 @@ memory while the head turns away from it.
 
 from __future__ import annotations
 
+import base64
+import io
 import itertools
 import math
 import time
 from dataclasses import dataclass
 from typing import Callable
 
+import numpy as np
+import numpy.typing as npt
+from PIL import Image, ImageOps
+
 from tracker.detector import Detection
 
 # A unit direction in the world frame.
 Vec3 = tuple[float, float, float]
+
+# Thumbnail size in pixels: twice what the panel shows, so it stays crisp on a
+# high-density screen.
+THUMB_SIZE = (48, 36)
 
 
 @dataclass
@@ -29,6 +39,7 @@ class WorldObject:
     direction: Vec3
     seen_at: float  # monotonic time of the last sighting
     dwelt_at: float | None = None  # last time the head was locked onto it
+    thumb: str | None = None  # JPEG data URI from the latest sighting
 
 
 class WorldModel:
@@ -55,10 +66,16 @@ class WorldModel:
         self._ids = itertools.count(1)
         self._objects: list[WorldObject] = []
 
-    def observe(self, dets: list[Detection], directions: list[Vec3]) -> list[int]:
+    def observe(
+        self,
+        dets: list[Detection],
+        directions: list[Vec3],
+        thumbs: list[str] | None = None,
+    ) -> list[int]:
         """Record one frame's detections, returning the object id of each.
 
-        `directions` is each detection's world direction, parallel to `dets`.
+        `directions` is each detection's world direction and `thumbs` its
+        picture, both parallel to `dets`.
         """
         now = self._time()
         self._forget(now)
@@ -86,6 +103,8 @@ class WorldModel:
             else:
                 obj = WorldObject(next(self._ids), det.label, vec, now)
                 self._objects.append(obj)
+            if thumbs is not None:
+                obj.thumb = thumbs[i]
             ids.append(obj.id)
         return ids
 
@@ -117,6 +136,7 @@ class WorldModel:
                 "dwelt_ago": (
                     None if o.dwelt_at is None else round(now - o.dwelt_at, 1)
                 ),
+                "thumb": o.thumb,
             }
             for o in self.objects()
             for yaw, pitch in [yaw_pitch(o.direction)]
@@ -129,6 +149,29 @@ class WorldModel:
         self._objects = [
             o for o in self._objects if now - o.seen_at <= self._forget_after
         ]
+
+
+def thumbnail(frame: npt.NDArray[np.uint8], det: Detection) -> str:
+    """A small JPEG of `det`'s box in a BGR `frame`, as a data URI.
+
+    Cropped to fill `THUMB_SIZE` exactly, so every row of the panel's table gets
+    the same footprint whatever the box's shape.
+    """
+    height, width = frame.shape[:2]
+    x1, y1, x2, y2 = det.box
+    x1, y1 = max(0, int(x1)), max(0, int(y1))
+    x2, y2 = min(width, max(x1 + 1, int(x2))), min(height, max(y1 + 1, int(y2)))
+
+    # Stride down to about twice the target first: resampling a whole person
+    # box to 48 px costs far more on the Pi than skipping pixels does.
+    tw, th = THUMB_SIZE
+    step = max(1, min((x2 - x1) // (2 * tw), (y2 - y1) // (2 * th)))
+    crop = np.ascontiguousarray(frame[y1:y2:step, x1:x2:step, ::-1])  # BGR to RGB
+    img = ImageOps.fit(Image.fromarray(crop), THUMB_SIZE, Image.Resampling.BILINEAR)
+
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=70)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 def angle_between(a: Vec3, b: Vec3) -> float:

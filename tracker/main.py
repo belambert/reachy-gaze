@@ -29,7 +29,7 @@ from tracker.tracking import (
     pixel_center,
     pose_matrix,
 )
-from tracker.world import WorldModel, yaw_pitch
+from tracker.world import WorldModel, thumbnail, yaw_pitch
 
 # Hunted for together, and in preference order: a cat in view outranks a person
 # in view, and the head will leave the one for the other.
@@ -354,8 +354,9 @@ class Tracker(ReachyMiniApp):
             # World direction of each box, so objects are remembered by where
             # they are rather than by a pixel the head's turning moves.
             dirs = [self._direction(d, K, D, head_pose, T_head_cam) for d in dets]
+            thumbs = [thumbnail(frame, d) for d in dets]
             with state.lock:
-                ids = state.world.observe(dets, dirs)
+                ids = state.world.observe(dets, dirs, thumbs)
                 shunned = [state.world.dwelt_within(i, DWELL_MEMORY) for i in ids]
             det = selector.select(dets, width, height, shunned)
             if det is None and not selector.has_target:
