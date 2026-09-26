@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from tracker.detector import Detection
-from tracker.tracking import (
+from reachy_gaze.detector import Detection
+from reachy_gaze.tracking import (
     CenterFilter,
     PoseSmoother,
     TargetSelector,
@@ -284,26 +284,26 @@ class TestVocabularyCheck:
             return self.result
 
     def test_a_missing_label_is_named(self, caplog):
-        from tracker.main import TRACK_LABELS, Tracker
+        from reachy_gaze.main import TRACK_LABELS, ReachyGaze
 
         with caplog.at_level("WARNING"):
-            Tracker._check_vocabulary(self._Stub([TRACK_LABELS[0]]))
+            ReachyGaze._check_vocabulary(self._Stub([TRACK_LABELS[0]]))
         for label in TRACK_LABELS[1:]:
             assert label in caplog.text
 
     def test_a_complete_vocabulary_does_not_warn(self, caplog):
-        from tracker.main import TRACK_LABELS, Tracker
+        from reachy_gaze.main import TRACK_LABELS, ReachyGaze
 
         with caplog.at_level("WARNING"):
-            Tracker._check_vocabulary(self._Stub(list(TRACK_LABELS) + ["mug"]))
+            ReachyGaze._check_vocabulary(self._Stub(list(TRACK_LABELS) + ["mug"]))
         assert caplog.text == ""
 
     def test_an_unreachable_server_is_not_fatal(self, caplog):
-        from tracker.detector import DetectorUnavailable
-        from tracker.main import Tracker
+        from reachy_gaze.detector import DetectorUnavailable
+        from reachy_gaze.main import ReachyGaze
 
         with caplog.at_level("WARNING"):
-            Tracker._check_vocabulary(self._Stub(DetectorUnavailable("down")))
+            ReachyGaze._check_vocabulary(self._Stub(DetectorUnavailable("down")))
         assert "down" in caplog.text
 
 
@@ -311,20 +311,20 @@ class TestPosture:
     """Lock and loss must not step the commanded antennas or the scan."""
 
     def test_antennas_are_continuous_across_the_transition(self):
-        from tracker.main import Tracker
+        from reachy_gaze.main import ReachyGaze
 
         t = 3.0
         # The blend scalar moves gradually, so neighbouring levels must too.
-        a = Tracker._antennas(0.50, t)[0]
-        b = Tracker._antennas(0.51, t)[0]
+        a = ReachyGaze._antennas(0.50, t)[0]
+        b = ReachyGaze._antennas(0.51, t)[0]
         assert abs(b - a) < np.deg2rad(1.0)
 
     def test_antenna_endpoints_are_wag_and_perk(self):
-        from tracker.main import Tracker
+        from reachy_gaze.main import ReachyGaze
 
         t = 0.0  # sine is zero here, so the wag term vanishes
-        assert Tracker._antennas(1.0, t)[0] == pytest.approx(np.deg2rad(20.0))
-        assert Tracker._antennas(0.0, t)[0] == pytest.approx(0.0)
+        assert ReachyGaze._antennas(1.0, t)[0] == pytest.approx(np.deg2rad(20.0))
+        assert ReachyGaze._antennas(0.0, t)[0] == pytest.approx(0.0)
 
     def angles(self, rotation):
         """Yaw and pitch in degrees, intrinsic, the way the scan builds them."""
@@ -340,71 +340,73 @@ class TestPosture:
     def test_a_scan_begins_at_the_yaw_the_head_already_has(self, held):
         # Regression: the sine ran off a fixed epoch, so starting a scan threw
         # the head to centre and then out to an arbitrary phase.
-        from tracker.main import Tracker
+        from reachy_gaze.main import ReachyGaze
 
         start = Rotation.from_euler("ZY", held, degrees=True)
-        phase = Tracker._scan_phase(start)
-        assert self.yaw(Tracker._scan_pose(0.0, phase)) == pytest.approx(
+        phase = ReachyGaze._scan_phase(start)
+        assert self.yaw(ReachyGaze._scan_pose(0.0, phase)) == pytest.approx(
             held[0], abs=1e-6
         )
 
     def test_the_scan_is_continuous_from_its_first_instant(self):
-        from tracker.main import CONTROL_HZ, SCAN_DEGREES, SCAN_HZ, Tracker
+        from reachy_gaze.main import CONTROL_HZ, SCAN_DEGREES, SCAN_HZ, ReachyGaze
 
         start = Rotation.from_euler("Z", 25.0, degrees=True)
-        phase = Tracker._scan_phase(start)
-        moved = start.inv() * Tracker._scan_pose(1 / CONTROL_HZ, phase)
+        phase = ReachyGaze._scan_phase(start)
+        moved = start.inv() * ReachyGaze._scan_pose(1 / CONTROL_HZ, phase)
         # One tick at the scan's top speed; more than that is a jump, and a
         # fixed bound would only be measuring the amplitude.
         fastest = 2 * math.pi * SCAN_HZ * SCAN_DEGREES / CONTROL_HZ
         assert np.degrees(moved.magnitude()) <= fastest, "no jump into a scan"
 
     def test_a_scan_heads_outward_not_back_to_centre(self):
-        from tracker.main import Tracker
+        from reachy_gaze.main import ReachyGaze
 
-        phase = Tracker._scan_phase(Rotation.from_euler("Z", 20.0, degrees=True))
-        assert self.yaw(Tracker._scan_pose(0.5, phase)) > 20.0
+        phase = ReachyGaze._scan_phase(Rotation.from_euler("Z", 20.0, degrees=True))
+        assert self.yaw(ReachyGaze._scan_pose(0.5, phase)) > 20.0
 
     def test_a_scan_from_the_left_heads_further_left_not_back(self):
         # Regression: asin always set off toward +yaw, so a head panned to a
         # negative yaw turned straight back to centre and never swept that side.
-        from tracker.main import Tracker
+        from reachy_gaze.main import ReachyGaze
 
-        phase = Tracker._scan_phase(Rotation.from_euler("Z", -20.0, degrees=True))
-        assert self.yaw(Tracker._scan_pose(0.5, phase)) < -20.0
+        phase = ReachyGaze._scan_phase(Rotation.from_euler("Z", -20.0, degrees=True))
+        assert self.yaw(ReachyGaze._scan_pose(0.5, phase)) < -20.0
 
     def test_a_scan_continues_the_way_the_head_is_turning(self):
         # Still turning negative as the target is lost: keep going, don't reverse.
-        from tracker.main import Tracker
+        from reachy_gaze.main import ReachyGaze
 
         start = Rotation.from_euler("Z", 0.0, degrees=True)
-        phase = Tracker._scan_phase(start, rate=-1.0)
-        assert self.yaw(Tracker._scan_pose(0.5, phase)) < 0.0
+        phase = ReachyGaze._scan_phase(start, rate=-1.0)
+        assert self.yaw(ReachyGaze._scan_pose(0.5, phase)) < 0.0
 
     def test_an_angle_beyond_the_scan_is_clamped_not_undefined(self):
-        from tracker.main import SCAN_DEGREES, Tracker
+        from reachy_gaze.main import SCAN_DEGREES, ReachyGaze
 
         beyond = Rotation.from_euler("ZY", [179.0, 40.0], degrees=True)
-        phase = Tracker._scan_phase(beyond)
+        phase = ReachyGaze._scan_phase(beyond)
         assert math.isfinite(phase)
-        assert self.yaw(Tracker._scan_pose(0.0, phase)) == pytest.approx(SCAN_DEGREES)
+        assert self.yaw(ReachyGaze._scan_pose(0.0, phase)) == pytest.approx(
+            SCAN_DEGREES
+        )
 
     def test_an_axis_of_zero_amplitude_is_not_a_nan(self):
         # Setting SCAN_DEGREES to 0 to turn the scan off must not divide by it
         # and hand the control loop a NaN pose.
-        from tracker.main import Tracker
+        from reachy_gaze.main import ReachyGaze
 
-        assert Tracker._phase_at(12.0, 0.0) == 0.0
+        assert ReachyGaze._phase_at(12.0, 0.0) == 0.0
 
     def test_the_scan_looks_all_the_way_round_and_stays_level(self):
-        from tracker.main import SCAN_DEGREES, SCAN_HZ, Tracker
+        from reachy_gaze.main import SCAN_DEGREES, SCAN_HZ, ReachyGaze
 
         # Even starting from a head tilted up or down, the scan only turns.
-        phase = Tracker._scan_phase(
+        phase = ReachyGaze._scan_phase(
             Rotation.from_euler("ZY", [10.0, 15.0], degrees=True)
         )
         seen = [
-            self.angles(Tracker._scan_pose(t / 20, phase))
+            self.angles(ReachyGaze._scan_pose(t / 20, phase))
             for t in range(int(20 / SCAN_HZ))
         ]
         yaws, pitches = [y for y, _ in seen], [p for _, p in seen]
@@ -464,7 +466,7 @@ class TestNoWhip:
 
     def peak_speed(self, offset, pull=None, seconds=30):
         """Fastest the head moves, in deg/s, closing an `offset` degree gap."""
-        from tracker.main import MAX_HEAD_PULL, MAX_HEAD_SPEED, SMOOTH_TAU
+        from reachy_gaze.main import MAX_HEAD_PULL, MAX_HEAD_SPEED, SMOOTH_TAU
 
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, pull or MAX_HEAD_PULL)
         goal = Rotation.from_euler("Z", offset, degrees=True)
@@ -479,7 +481,7 @@ class TestNoWhip:
 
     def terminal(self, pull=None):
         """Speed at which the capped pull balances damping: the real ceiling."""
-        from tracker.main import MAX_HEAD_PULL, SMOOTH_TAU
+        from reachy_gaze.main import MAX_HEAD_PULL, SMOOTH_TAU
 
         return np.degrees((pull or MAX_HEAD_PULL) * SMOOTH_TAU / 2)
 

@@ -20,7 +20,7 @@ import numpy as np
 import numpy.typing as npt
 from PIL import Image, ImageOps
 
-from tracker.detector import Detection
+from reachy_gaze.detector import Detection
 
 # A unit direction in the world frame.
 Vec3 = tuple[float, float, float]

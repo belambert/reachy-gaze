@@ -1,6 +1,6 @@
 """Track a named COCO object with Reachy Mini's head.
 
-Detection runs off-board (see ``tracker.server``) because the Pi's CPU is
+Detection runs off-board (see ``reachy_gaze.server``) because the Pi's CPU is
 already busy with motor control. Two rates keep that from showing: the vision
 thread re-anchors the target a handful of times a second, while the control loop
 slews the head toward that anchor at 50 Hz.
@@ -20,8 +20,8 @@ from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
-from tracker.detector import BACKENDS, Detector, DetectorUnavailable, make_detector
-from tracker.tracking import (
+from reachy_gaze.detector import BACKENDS, Detector, DetectorUnavailable, make_detector
+from reachy_gaze.tracking import (
     CenterFilter,
     PoseSmoother,
     TargetSelector,
@@ -29,7 +29,7 @@ from tracker.tracking import (
     pixel_center,
     pose_matrix,
 )
-from tracker.world import Vec3, WorldModel, thumbnail, yaw_pitch
+from reachy_gaze.world import Vec3, WorldModel, thumbnail, yaw_pitch
 
 # Hunted for together, and in preference order: a cat in view outranks a person
 # in view, and the head will leave the one for the other.
@@ -55,9 +55,9 @@ DWELL_MEMORY = 60.0  # once bored, shun every object the head dwelt on this rece
 
 # Which detection backend to use, and where to reach it. Both are prefilled in
 # the control panel and overridable from the environment without editing code.
-DEFAULT_BACKEND = os.environ.get("TRACKER_BACKEND", "triton")
+DEFAULT_BACKEND = os.environ.get("REACHY_GAZE_BACKEND", "triton")
 DEFAULT_SERVER_URL = os.environ.get(
-    "TRACKER_SERVER_URL", BACKENDS[DEFAULT_BACKEND].default_url
+    "REACHY_GAZE_SERVER_URL", BACKENDS[DEFAULT_BACKEND].default_url
 )
 
 logger = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ class State:
             }
 
 
-class Tracker(ReachyMiniApp):
+class ReachyGaze(ReachyMiniApp):
     """Point the head at whichever COCO class the control panel asks for."""
 
     custom_app_url: str | None = "http://0.0.0.0:8042"
@@ -224,7 +224,7 @@ class Tracker(ReachyMiniApp):
             target=self._track,
             args=(reachy_mini, state, stop_event),
             daemon=True,
-            name="tracker-vision",
+            name="gaze-vision",
         )
         vision.start()
         try:
@@ -500,7 +500,7 @@ class Tracker(ReachyMiniApp):
         """
         yaw, _, _ = rotation.as_euler("ZYX", degrees=True)
         heading = rate if abs(rate) > 1e-3 else yaw
-        return Tracker._phase_at(yaw, SCAN_DEGREES, heading)
+        return ReachyGaze._phase_at(yaw, SCAN_DEGREES, heading)
 
     @staticmethod
     def _phase_at(angle: float, amplitude: float, heading: float = 1.0) -> float:
@@ -545,7 +545,7 @@ class Tracker(ReachyMiniApp):
 
 
 if __name__ == "__main__":
-    app = Tracker()
+    app = ReachyGaze()
     try:
         app.wrapped_run()
     except KeyboardInterrupt:

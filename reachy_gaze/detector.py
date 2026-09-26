@@ -197,7 +197,7 @@ class TritonDetector(_JpegDetector):
 
 
 class BuiltinDetector(_JpegDetector):
-    """Detector backed by the built-in FastAPI server (see tracker.server).
+    """Detector backed by the built-in FastAPI server (see reachy_gaze.server).
 
     A frame is POSTed as JPEG and boxes come back in downscaled coordinates,
     which are rescaled to the source frame. Simpler than Triton and happy on

@@ -1,5 +1,5 @@
 ---
-title: Tracker
+title: Reachy Gaze
 emoji: 👁️
 colorFrom: red
 colorTo: blue
@@ -11,7 +11,7 @@ tags:
  - reachy_mini_python_app
 ---
 
-# Tracker
+# Reachy Gaze
 
 Reachy Mini follows people, cats, dogs and birds with its head, tracking them
 across the room with the body turning to extend the reach. It looks for all
@@ -84,7 +84,7 @@ one while the head waits it out.
 ### The world model
 
 Alongside the one target it aims at, the robot keeps a short-term memory of
-everything it has seen lately (`tracker/world.py`). Each entry holds the
+everything it has seen lately (`reachy_gaze/world.py`). Each entry holds the
 object's type, its location, when it was last seen, when the head last watched
 it, and a small picture of it from the last time it was the target. It keeps
 every box of every tracked class, not only the target.
@@ -172,8 +172,8 @@ needed, and happy on CPU, CUDA or Apple MPS, so it suits a laptop on the same
 LAN:
 
     uv sync --extra server
-    uv run tracker-server              # serves on 0.0.0.0:8100
-    uv run tracker-server --model yolo11s.pt --port 8100
+    uv run reachy-gaze-server              # serves on 0.0.0.0:8100
+    uv run reachy-gaze-server --model yolo11s.pt --port 8100
 
 See [Choosing a model](#choosing-a-model) for which model to pass.
 
@@ -199,8 +199,8 @@ Tracking is **on from the moment the app starts** — untick **Tracking enabled*
 to stop it. That setting is not persisted, so a restart begins tracking again.
 
 The backend and address are prefilled from `DEFAULT_BACKEND` and
-`DEFAULT_SERVER_URL` in `tracker/main.py` (Triton on `spark-10cf:8101`). Set
-`TRACKER_BACKEND` (`triton`, `builtin` or `vlm`) and `TRACKER_SERVER_URL` to
+`DEFAULT_SERVER_URL` in `reachy_gaze/main.py` (Triton on `spark-10cf:8101`). Set
+`REACHY_GAZE_BACKEND` (`triton`, `builtin` or `vlm`) and `REACHY_GAZE_SERVER_URL` to
 change them without editing code; with only the backend set, the address
 defaults to that backend's.
 
@@ -215,7 +215,7 @@ and 5° up — with ←/→ the yaw and ↑/↓ the pitch. This is the absolute
 aim in the world: the head pose comes back from forward kinematics over all the
 joints, so the body's turntable yaw is already folded in.
 
-What it hunts for is `TRACK_LABELS` in `tracker/main.py` — `cat`, `dog`,
+What it hunts for is `TRACK_LABELS` in `reachy_gaze/main.py` — `cat`, `dog`,
 `bird`, `person`, most preferred first. Any COCO class works there, and
 reordering the list is how you change what it would rather watch. Whenever the Detector address
 changes the app checks the labels against the server's vocabulary and logs a
@@ -255,7 +255,7 @@ reorders the table. Re-run the benchmark before trusting them elsewhere.
 
 ## Tuning
 
-Constants live at the top of `tracker/main.py`:
+Constants live at the top of `reachy_gaze/main.py`:
 
 | Constant         | Default | Effect                                                    |
 | ---------------- | ------- | --------------------------------------------------------- |
@@ -345,7 +345,7 @@ by the detection rate, not the follower. Raise it if the head visibly trails
 things you care about.
 
 Selection gates — minimum box area, max frame-to-frame jump, misses tolerated —
-are constructor arguments on `TargetSelector` in `tracker/tracking.py`.
+are constructor arguments on `TargetSelector` in `reachy_gaze/tracking.py`.
 
 If the head settles slightly off-center and stops, that's `CenterFilter`'s dead
 zone doing its job: it trades a standing offset of up to 0.02 in normalized
@@ -353,7 +353,7 @@ frame coordinates for a head that doesn't dither on detector noise.
 
 ## Swapping the detector
 
-`tracker/detector.py` defines a `Detector` protocol — `classes()` and
+`reachy_gaze/detector.py` defines a `Detector` protocol — `classes()` and
 `detect(frame, labels, conf)` — and the backends that implement it:
 
 - **`TritonDetector`** — the vision-server's `tracker` ensemble over gRPC.
@@ -375,7 +375,7 @@ its key, label, default address, and constructor.
 
     uv sync --extra dev
     uv run pytest
-    uv run black tracker tests && uv run isort tracker tests
+    uv run black reachy_gaze tests && uv run isort reachy_gaze tests
 
 The tests cover target selection, the world model, smoothing, the slew math,
 and the detector wire protocol against a stub server. None of them need a robot. The panel's

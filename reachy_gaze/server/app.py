@@ -1,6 +1,6 @@
 """COCO detection service: run this on the machine with the GPU, not on the robot.
 
-uv run --extra server tracker-server --host 0.0.0.0
+uv run --extra server reachy-gaze-server --host 0.0.0.0
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from fastapi import FastAPI, Query, Request
 from PIL import Image
 from ultralytics import YOLO
 
-from tracker.server.traffic import SUMMARY_EVERY, Traffic
+from reachy_gaze.server.traffic import SUMMARY_EVERY, Traffic
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ async def lifespan(_: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="tracker detector", lifespan=lifespan)
+app = FastAPI(title="reachy gaze detector", lifespan=lifespan)
 cli = typer.Typer(add_completion=False)
 
 

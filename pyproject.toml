@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 
 [project]
-name = "tracker"
+name = "reachy_gaze"
 version = "0.1.0"
 description = "Point Reachy Mini's head at a named object — a person, a cat, a dog"
 readme = "README.md"
@@ -39,10 +39,10 @@ dev = [
 ]
 
 [project.entry-points."reachy_mini_apps"]
-tracker = "tracker.main:Tracker"
+reachy_gaze = "reachy_gaze.main:ReachyGaze"
 
 [project.scripts]
-tracker-server = "tracker.server.app:cli"
+reachy-gaze-server = "reachy_gaze.server.app:cli"
 
 [tool.setuptools]
 package-dir = { "" = "." }
@@ -52,7 +52,7 @@ include-package-data = true
 where = ["."]
 
 [tool.setuptools.package-data]
-tracker = ["**/*"] # Also include all non-.py files
+reachy_gaze = ["**/*"] # Also include all non-.py files
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

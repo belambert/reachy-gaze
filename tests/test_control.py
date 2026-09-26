@@ -3,7 +3,7 @@ import threading
 import numpy as np
 import pytest
 
-from tracker.main import State, Tracker
+from reachy_gaze.main import ReachyGaze, State
 
 
 class FakeMini:
@@ -28,44 +28,44 @@ class FakeMini:
 
 
 @pytest.fixture
-def tracker():
-    return Tracker()
+def app():
+    return ReachyGaze()
 
 
-def drive(tracker, mini, state):
-    tracker._drive(mini, state, mini.stop_event)
+def drive(app, mini, state):
+    app._drive(mini, state, mini.stop_event)
     return mini.commands
 
 
-def test_survives_a_pose_that_is_not_published_yet(tracker):
+def test_survives_a_pose_that_is_not_published_yet(app):
     # Regression: this used to raise straight out of the control loop, which
     # took down the app and left it restarting in a loop.
     mini = FakeMini(pose_ready=False)
-    commands = drive(tracker, mini, State())
+    commands = drive(app, mini, State())
 
     assert len(commands) >= 6, "the loop must keep commanding without a pose"
     assert all(head is not None for head, _ in commands)
 
 
-def test_keeps_the_last_known_pose_when_it_goes_missing(tracker):
+def test_keeps_the_last_known_pose_when_it_goes_missing(app):
     state = State()
     seeded = np.eye(4)
     seeded[0, 3] = 0.123
     state.head_pose = seeded
 
-    drive(tracker, FakeMini(pose_ready=False), state)
+    drive(app, FakeMini(pose_ready=False), state)
     assert state.head_pose[0, 3] == pytest.approx(0.123), "must not clobber it"
 
 
-def test_caches_the_pose_when_it_is_available(tracker):
+def test_caches_the_pose_when_it_is_available(app):
     state = State()
-    drive(tracker, FakeMini(pose_ready=True), state)
+    drive(app, FakeMini(pose_ready=True), state)
     assert state.head_pose == pytest.approx(np.eye(4))
 
 
-def test_commands_are_finite_and_well_formed(tracker):
+def test_commands_are_finite_and_well_formed(app):
     mini = FakeMini(pose_ready=True)
-    for head, antennas in drive(tracker, mini, State()):
+    for head, antennas in drive(app, mini, State()):
         assert head.shape == (4, 4)
         assert np.isfinite(head).all()
         assert len(antennas) == 2
@@ -75,8 +75,8 @@ def test_commands_are_finite_and_well_formed(tracker):
 def test_tracked_labels_are_real_coco_classes():
     # A typo here is near-silent: the server recognises none of the labels and
     # falls back to detecting everything, so the head chases furniture.
-    from tracker.detector import COCO_CLASSES
-    from tracker.main import TRACK_LABELS
+    from reachy_gaze.detector import COCO_CLASSES
+    from reachy_gaze.main import TRACK_LABELS
 
     assert set(TRACK_LABELS) <= set(COCO_CLASSES)
 
@@ -96,7 +96,7 @@ class TestHoldWindow:
 
         from scipy.spatial.transform import Rotation
 
-        from tracker.main import State
+        from reachy_gaze.main import State
 
         state = State()
         state.goal = Rotation.identity()
@@ -104,7 +104,7 @@ class TestHoldWindow:
         return state.snapshot()
 
     def test_no_target_is_not_locked(self):
-        from tracker.main import State
+        from reachy_gaze.main import State
 
         snap = State().snapshot()
         assert snap["locked"] is False
@@ -117,7 +117,7 @@ class TestHoldWindow:
 
     @pytest.mark.parametrize("ago", [2.0, 5.0, 9.0])
     def test_the_aim_is_held_well_past_the_last_sighting(self, ago):
-        from tracker.main import LOST_AFTER
+        from reachy_gaze.main import LOST_AFTER
 
         assert LOST_AFTER >= 10.0, "the hold window is what this guards"
         assert self.state_at(ago)["locked"] is True
@@ -149,7 +149,7 @@ class TestWorld:
         assert State().snapshot()["world"] == []
 
     def test_sightings_are_exposed_to_the_panel(self):
-        from tracker.detector import Detection
+        from reachy_gaze.detector import Detection
 
         state = State()
         state.world.observe([Detection("dog", 0.9, (0, 0, 1, 1))], [(0.0, 1.0, 0.0)])
@@ -172,8 +172,8 @@ class TestBoredom:
         """A State whose head has watched a cat for `looked_for` seconds."""
         import time
 
-        from tracker.detector import Detection
-        from tracker.world import WorldModel
+        from reachy_gaze.detector import Detection
+        from reachy_gaze.world import WorldModel
 
         start = time.monotonic() - looked_for
         clock = iter([start] * 2 + [time.monotonic()] * 100)
@@ -188,31 +188,31 @@ class TestBoredom:
         assert snap["bored_in"] is None and snap["bored"] is False
 
     def test_counts_down_from_when_the_look_began(self):
-        from tracker.main import BORED_AFTER
+        from reachy_gaze.main import BORED_AFTER
 
         snap = self.state(looked_for=12.0).snapshot()
         assert snap["bored_in"] == pytest.approx(BORED_AFTER - 12.0, abs=0.2)
 
     def test_never_negative(self):
-        from tracker.main import BORED_AFTER
+        from reachy_gaze.main import BORED_AFTER
 
         assert self.state(looked_for=BORED_AFTER + 5).snapshot()["bored_in"] == 0.0
 
     def test_each_object_in_focus_counts_down(self):
-        from tracker.main import BORED_AFTER
+        from reachy_gaze.main import BORED_AFTER
 
         [cat] = self.state(looked_for=12.0).snapshot()["world"]
         assert cat["bored_in"] == pytest.approx(BORED_AFTER - 12.0, abs=0.2)
 
     def test_an_object_out_of_focus_has_no_countdown(self):
-        from tracker.detector import Detection
+        from reachy_gaze.detector import Detection
 
         state = State()
         state.world.observe([Detection("cat", 0.9, (0, 0, 1, 1))], [(1.0, 0.0, 0.0)])
         assert state.snapshot()["world"][0]["bored_in"] is None
 
     def test_what_the_head_looks_at_is_flagged_in_the_world(self):
-        from tracker.detector import Detection
+        from reachy_gaze.detector import Detection
 
         state = State()
         state.world.observe(
@@ -228,7 +228,7 @@ class TestAvoided:
     """The panel is told which objects the head is passing over while bored."""
 
     def state(self, bored):
-        from tracker.detector import Detection
+        from reachy_gaze.detector import Detection
 
         state = State()
         state.world.observe(
@@ -260,7 +260,7 @@ class TestHeldAim:
 
         from scipy.spatial.transform import Rotation
 
-        from tracker.main import LOST_AFTER
+        from reachy_gaze.main import LOST_AFTER
 
         state = State()
         state.goal = Rotation.from_euler("Z", 90, degrees=True)
@@ -280,7 +280,7 @@ class TestAim:
     def test_yaw_is_positive_to_the_left(self):
         from scipy.spatial.transform import Rotation
 
-        from tracker.main import look_yaw_pitch
+        from reachy_gaze.main import look_yaw_pitch
 
         # +Y is left in the head frame, so a +30 deg turn about Z reads as left.
         head = np.eye(4)
@@ -292,7 +292,7 @@ class TestAim:
     def test_pitch_is_positive_looking_up(self):
         from scipy.spatial.transform import Rotation
 
-        from tracker.main import look_yaw_pitch
+        from reachy_gaze.main import look_yaw_pitch
 
         # A -20 deg rotation about Y lifts the forward +X axis, i.e. looks up.
         head = np.eye(4)
@@ -306,7 +306,7 @@ class TestBackendSelection:
     """The detector backend is selectable, and the panel is told the options."""
 
     def test_the_default_backend_is_reported(self):
-        from tracker.main import DEFAULT_BACKEND
+        from reachy_gaze.main import DEFAULT_BACKEND
 
         assert State().snapshot()["backend"] == DEFAULT_BACKEND
 
@@ -315,14 +315,14 @@ class TestBackendSelection:
         assert {"triton", "builtin", "vlm"} <= listed
 
     def test_config_accepts_a_known_backend(self):
-        from tracker.main import Config
+        from reachy_gaze.main import Config
 
         assert Config(backend="builtin").backend == "builtin"
 
     def test_config_rejects_an_unknown_backend(self):
         from pydantic import ValidationError
 
-        from tracker.main import Config
+        from reachy_gaze.main import Config
 
         with pytest.raises(ValidationError):
             Config(backend="nope")
@@ -355,7 +355,7 @@ class TestBoredOfADirection:
             return ["cat"]
 
         def detect(self, frame, labels, conf):
-            from tracker.detector import Detection
+            from reachy_gaze.detector import Detection
 
             self.calls += 1
             if self.calls % self.every:
@@ -363,7 +363,7 @@ class TestBoredOfADirection:
             return [Detection("cat", 0.9, (300.0, 220.0, 380.0, 300.0))]
 
     def test_an_intermittent_target_still_bores_the_head(self, monkeypatch):
-        import tracker.main as main
+        import reachy_gaze.main as main
 
         monkeypatch.setattr(main, "DETECT_HZ", 100.0)
         monkeypatch.setattr(main, "BORED_AFTER", 0.5)
@@ -376,7 +376,7 @@ class TestBoredOfADirection:
         media.camera = self.Camera()
         state, stop = State(), threading.Event()
         vision = threading.Thread(
-            target=Tracker()._track_forever,
+            target=ReachyGaze()._track_forever,
             args=(self.Mini(media), state, stop),
             daemon=True,
         )

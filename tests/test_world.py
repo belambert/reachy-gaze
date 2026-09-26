@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from tracker.detector import Detection
-from tracker.world import THUMB_SIZE, WorldModel, thumbnail, yaw_pitch
+from reachy_gaze.detector import Detection
+from reachy_gaze.world import THUMB_SIZE, WorldModel, thumbnail, yaw_pitch
 
 
 def det(label):

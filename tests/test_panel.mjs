@@ -12,7 +12,7 @@ import fs from "node:fs";
 import process from "node:process";
 import vm from "node:vm";
 
-const SOURCE = process.argv[2] ?? "tracker/static/main.js";
+const SOURCE = process.argv[2] ?? "reachy_gaze/static/main.js";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function makeEl(id) {

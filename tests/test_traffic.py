@@ -1,6 +1,6 @@
 import pytest
 
-from tracker.server.traffic import Traffic
+from reachy_gaze.server.traffic import Traffic
 
 
 class Clock:

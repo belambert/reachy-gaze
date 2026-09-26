@@ -9,8 +9,8 @@ import pytest
 from PIL import Image
 from tritonclient.utils import InferenceServerException
 
-import tracker.detector as detector
-from tracker.detector import (
+import reachy_gaze.detector as detector
+from reachy_gaze.detector import (
     BACKENDS,
     COCO_CLASSES,
     BuiltinDetector,
