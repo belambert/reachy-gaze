@@ -5,7 +5,7 @@ colorFrom: red
 colorTo: blue
 sdk: static
 pinned: false
-short_description: Point Reachy Mini's head at people, cats, dogs and birds
+short_description: Make Reachy Mini look at people and pets
 tags:
  - reachy_mini
  - reachy_mini_python_app

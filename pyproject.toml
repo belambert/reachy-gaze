@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "reachy_gaze"
 version = "0.1.0"
-description = "Point Reachy Mini's head at a named object — a person, a cat, a dog"
+description = "Make Reachy Mini look at people and pets"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
