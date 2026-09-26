@@ -127,7 +127,7 @@ class TritonDetector(_JpegDetector):
         quality: int = 75,
         timeout: float = 2.0,
     ) -> None:
-        """Point the detector at a Triton gRPC endpoint, e.g. spark-10cf:8101."""
+        """Point the detector at a Triton gRPC endpoint, e.g. localhost:8101."""
         super().__init__(width, quality, timeout)
         # tritonclient wants a bare host:port; tolerate a pasted scheme anyway
         self.url = url.split("://", 1)[-1].rstrip("/")
@@ -271,7 +271,7 @@ class VlmDetector(_JpegDetector):
     fences it wraps them in. Coordinates are read as [0, 1000] normalised (the
     Qwen grounding convention) and mapped to the source frame, so the sent JPEG
     can be downscaled freely. The model id is discovered from /v1/models, so the
-    URL is just the server, e.g. http://spark-10cf:8000.
+    URL is just the server, e.g. http://localhost:8000.
 
     A VLM is far slower than a detector network, so this is a frame every second
     or two, not a stream; the timeout is correspondingly generous.
@@ -286,7 +286,7 @@ class VlmDetector(_JpegDetector):
         quality: int = 75,
         timeout: float = 30.0,
     ) -> None:
-        """Point the detector at a vLLM server, e.g. http://spark-10cf:8000."""
+        """Point the detector at a vLLM server, e.g. http://localhost:8000."""
         super().__init__(width, quality, timeout)
         self.url = url.rstrip("/").removesuffix("/v1")
         self._session = requests.Session()
@@ -469,12 +469,12 @@ class Backend:
 
 BACKENDS: dict[str, Backend] = {
     "triton": Backend(
-        "triton", "Triton (vision-server)", "spark-10cf:8101", TritonDetector
+        "triton", "Triton (vision-server)", "localhost:8101", TritonDetector
     ),
     "builtin": Backend(
-        "builtin", "Built-in server", "http://10.0.0.206:8100", BuiltinDetector
+        "builtin", "Built-in server", "http://localhost:8100", BuiltinDetector
     ),
-    "vlm": Backend("vlm", "VLM (vLLM)", "http://spark-10cf:8000", VlmDetector),
+    "vlm": Backend("vlm", "VLM (vLLM)", "http://localhost:8000", VlmDetector),
 }
 
 

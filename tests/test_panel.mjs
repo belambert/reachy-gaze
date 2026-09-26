@@ -54,8 +54,8 @@ function harness(source, { stateStatus = 200 } = {}) {
         locked: false, detector_ok: true, error: "", fps: 0, center: null,
         seen_ago: null, backend: "triton",
         backends: [
-            { key: "triton", label: "Triton (vision-server)", default_url: "spark-10cf:8101" },
-            { key: "builtin", label: "Built-in server", default_url: "http://10.0.0.206:8100" },
+            { key: "triton", label: "Triton (vision-server)", default_url: "localhost:8101" },
+            { key: "builtin", label: "Built-in server", default_url: "http://localhost:8100" },
         ],
     };
     const posts = [];
@@ -137,8 +137,8 @@ const tests = {
 
         const post = h.posts.at(-1);
         assert.equal(post.backend, "builtin");
-        assert.equal(post.server_url, "http://10.0.0.206:8100");
-        assert.equal(h.els["server-url"].value, "http://10.0.0.206:8100");
+        assert.equal(post.server_url, "http://localhost:8100");
+        assert.equal(h.els["server-url"].value, "http://localhost:8100");
     },
 
     async "an unreachable app is reported, not swallowed"() {
