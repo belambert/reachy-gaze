@@ -5,6 +5,7 @@ colorFrom: red
 colorTo: blue
 sdk: static
 pinned: false
+license: mit
 short_description: Make Reachy Mini look at people and pets
 tags:
  - reachy_mini
@@ -29,9 +30,13 @@ Run one of these somewhere the robot can reach:
 
 | Backend              | Address            | Notes                                         |
 | -------------------- | ------------------ | --------------------------------------------- |
-| Triton (`triton`)    | `host:8101` (gRPC) | Default and fastest; set up from its own repo |
 | Built-in (`builtin`) | `http://host:8100` | Bundled FastAPI + YOLO11; CPU, CUDA or MPS    |
+| Triton (`triton`)    | `host:8101` (gRPC) | Fastest; needs a private Triton server        |
 | VLM (`vlm`)          | `http://host:8000` | A vLLM vision model; slow, any labels         |
+
+The app defaults to the built-in server. The Triton backend is faster but needs
+a private server; pick it in the control panel or set
+`REACHY_GAZE_BACKEND=triton`.
 
 To run the built-in server:
 
@@ -61,3 +66,7 @@ is the Hugging Face Space the robot installs from. A change only reaches the
 robot once it's pushed to `space`.
 
     git push origin main && git push space main
+
+## License
+
+MIT; see [LICENSE](LICENSE).

@@ -55,7 +55,7 @@ DWELL_MEMORY = 60.0  # once bored, shun every object the head dwelt on this rece
 
 # Which detection backend to use, and where to reach it. Both are prefilled in
 # the control panel and overridable from the environment without editing code.
-DEFAULT_BACKEND = os.environ.get("REACHY_GAZE_BACKEND", "triton")
+DEFAULT_BACKEND = os.environ.get("REACHY_GAZE_BACKEND", "builtin")
 DEFAULT_SERVER_URL = os.environ.get(
     "REACHY_GAZE_SERVER_URL", BACKENDS[DEFAULT_BACKEND].default_url
 )
