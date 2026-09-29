@@ -106,13 +106,6 @@ class TargetSelector:
     seen for `upgrade_after` frames running to do that, so a detection
     flickering at the confidence threshold cannot bounce the head between two
     subjects.
-
-    `tire` drops the target out of boredom; when to, is the caller's call (the
-    world model times it, by direction). The selector then stays bored until it
-    locks onto something new, and meanwhile passes over any detection flagged in
-    the `shunned` mask given to `select`, so the head turns to something else
-    rather than snapping straight back. Without a mask the lock is still
-    dropped, but nothing is steered clear of.
     """
 
     def __init__(
@@ -133,23 +126,11 @@ class TargetSelector:
         self._label: str | None = None
         self._misses = 0
         self._better = 0
-        self._bored = False
 
     def select(
-        self,
-        dets: list[Detection],
-        width: int,
-        height: int,
-        shunned: list[bool] | None = None,
+        self, dets: list[Detection], width: int, height: int
     ) -> Detection | None:
-        """Pick the detection to aim at, or None when none is plausible.
-
-        `shunned`, parallel to `dets`, flags detections to pass over while
-        bored of the last target.
-        """
-        if self._bored and shunned:
-            dets = [d for d, shun in zip(dets, shunned) if not shun]
-
+        """Pick the detection to aim at, or None when none is plausible."""
         if not dets:
             self._miss()
             return None
@@ -173,8 +154,6 @@ class TargetSelector:
                 self._miss()
                 return None
 
-        if acquiring:  # a fresh lock ends boredom
-            self._bored = False
         self._center = norm_center(det, width, height)
         self._label = det.label
         self._misses = 0
@@ -199,16 +178,6 @@ class TargetSelector:
         return self._center is not None
 
     @property
-    def bored(self) -> bool:
-        """Whether we dropped a target out of boredom and have not locked on since."""
-        return self._bored
-
-    def tire(self) -> None:
-        """Drop the target out of boredom, shunning until something new is locked."""
-        self._bored = True
-        self._center = self._label = None
-
-    @property
     def label(self) -> str | None:
         """Class of the current target, if there is one."""
         return self._label
@@ -219,7 +188,6 @@ class TargetSelector:
         self._label = None
         self._misses = 0
         self._better = 0
-        self._bored = False
 
 
 class CenterFilter:

@@ -44,7 +44,7 @@ function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
         "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
-        "badge-fps", "badge-bored", "marker", "error", "aim", "targets", "world",
+        "badge-fps", "marker", "error", "aim", "targets",
         "view", "rings",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
@@ -175,36 +175,6 @@ const tests = {
         assert.equal(lock.textContent, "searching");
     },
 
-    async "the world model is a table, newest first, what's in focus highlighted"() {
-        const h = harness(SOURCE);
-        h.app.world = [
-            { id: 2, label: "cat", yaw: 30.4, pitch: -5, age: 0.2, dwelt_ago: 0.2, focused: true, bored_in: 17.3 },
-            { id: 1, label: "person", yaw: -12, pitch: 0, age: 41.6, dwelt_ago: null, focused: false, bored_in: null },
-        ];
-        await sleep(400);
-        const rows = h.els.world.options;
-        assert.deepEqual(rows.map((r) => r.options.slice(1).map((c) => c.textContent)), [
-            ["←30° ↓5°", "0s ago", "0s ago", "18s"],
-            ["→12°", "42s ago", "–", "–"],
-        ]);
-        assert.deepEqual(rows.map((r) => r.options[0].options.at(-1)), [" cat", " person"]);
-        assert.deepEqual(rows.map((r) => r.className), ["focused", ""]);
-    },
-
-    async "each object shows its picture, or its emoji until it has one"() {
-        const h = harness(SOURCE);
-        h.app.world = [
-            { id: 2, label: "cat", yaw: 0, pitch: 0, age: 0, dwelt_ago: null, thumb: "data:image/jpeg;base64,AAA" },
-            { id: 1, label: "dog", yaw: 0, pitch: 0, age: 0, dwelt_ago: null, thumb: null },
-        ];
-        await sleep(400);
-        const [cat, dog] = h.els.world.options.map((r) => r.options[0].options[0]);
-        assert.equal(cat.id, "img");
-        assert.equal(cat.src, "data:image/jpeg;base64,AAA");
-        assert.equal(dog.id, "span");
-        assert.equal(dog.textContent, "🐶");
-    },
-
     async "the aim readout uses the same arrows"() {
         const h = harness(SOURCE);
         h.app.aim = { yaw: -20.4, pitch: 5 };
@@ -214,45 +184,6 @@ const tests = {
         h.app.aim = { yaw: 0.3, pitch: -0.2 };
         await sleep(400);
         assert.equal(h.els.aim.textContent, "Aimed straight ahead.");
-    },
-
-    async "objects avoided while bored are greyed out"() {
-        const h = harness(SOURCE);
-        h.app.world = [
-            { id: 2, label: "cat", yaw: 0, pitch: 0, age: 0, dwelt_ago: 1, avoided: true },
-            { id: 1, label: "dog", yaw: 40, pitch: 0, age: 0, dwelt_ago: null, avoided: false },
-        ];
-        await sleep(400);
-        assert.deepEqual(h.els.world.options.map((r) => r.className), ["avoided", ""]);
-    },
-
-    async "an empty world says so"() {
-        const h = harness(SOURCE);
-        h.app.world = [];
-        await sleep(60);
-        const [row] = h.els.world.options;
-        assert.equal(row.options[0].textContent, "Nothing seen lately.");
-    },
-
-    async "the boredom badge counts down, then says it is bored"() {
-        const h = harness(SOURCE);
-        await sleep(60);
-        const node = h.els["badge-bored"];
-        assert.ok(node.hidden, "nothing to tire of, nothing to show");
-
-        Object.assign(h.app, { bored: false, bored_in: 6.2 });
-        await sleep(400);
-        assert.ok(!node.hidden);
-        assert.equal(node.textContent, "bored in 7s");
-
-        Object.assign(h.app, { bored: true, bored_in: null });
-        await sleep(400);
-        assert.equal(node.textContent, "bored: avoiding recent targets");
-        assert.ok(node.classList.contains("warn"));
-
-        Object.assign(h.app, { bored: false, bored_in: null });
-        await sleep(400);
-        assert.ok(node.hidden);
     },
 
     async "rings are drawn every 10 degrees out to the frame's corners"() {

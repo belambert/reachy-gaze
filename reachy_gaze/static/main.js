@@ -102,7 +102,6 @@ function apply(state) {
     }
 
     el("badge-fps").textContent = state.detector_ok ? `${state.fps} fps` : "– fps";
-    boredom(state);
 
     const marker = el("marker");
     if (state.center && state.locked) {
@@ -116,7 +115,6 @@ function apply(state) {
     renderTargets(state.targets ?? []);
     renderRings(state.lens);
     el("aim").textContent = aimText(state.aim);
-    renderWorld(state.world ?? []);
 
     el("error").textContent = state.error || "";
 }
@@ -126,7 +124,7 @@ function aimText(aim) {
     return aim ? `Aimed ${bearing(aim)}.` : "";
 }
 
-// A world direction as arrows, e.g. "←20° ↑5°" for 20° left and 5° up.
+// A direction as arrows, e.g. "←20° ↑5°" for 20° left and 5° up.
 function bearing({ yaw, pitch }) {
     yaw = Math.round(yaw);
     pitch = Math.round(pitch);
@@ -135,69 +133,6 @@ function bearing({ yaw, pitch }) {
     if (yaw) parts.push(`${yaw > 0 ? "←" : "→"}${Math.abs(yaw)}°`);
     if (pitch) parts.push(`${pitch > 0 ? "↑" : "↓"}${Math.abs(pitch)}°`);
     return parts.join(" ");
-}
-
-// Counts down to the head tiring of its target; once it has, says so until
-// something new takes the lock. Hidden when there is neither.
-function boredom({ bored, bored_in }) {
-    const node = el("badge-bored");
-    node.hidden = !bored && bored_in == null;
-    if (bored) badge("badge-bored", "warn", "bored: avoiding recent targets");
-    else if (bored_in != null) badge("badge-bored", "", `bored in ${Math.ceil(bored_in)}s`);
-}
-
-// The object's picture from its latest sighting, then its type; the emoji
-// stands in until there is a picture.
-function objectCell({ label, thumb }) {
-    const cell = document.createElement("td");
-    const pic = document.createElement(thumb ? "img" : "span");
-    pic.className = "thumb";
-    if (thumb) {
-        pic.src = thumb;
-        pic.alt = label;
-    } else {
-        pic.textContent = emoji(label);
-    }
-    cell.append(pic, ` ${label}`);
-    return cell;
-}
-
-// The world model as a table, newest first, what the head is looking at highlighted.
-function renderWorld(objects) {
-    const ago = (s) => (s == null ? "–" : `${Math.round(s)}s ago`);
-    // Only objects in focus are counting down; ceil, so it reads 1s, not 0s,
-    // until the moment it actually runs out.
-    const countdown = (s) => (s == null ? "–" : `${Math.ceil(s)}s`);
-    const rows = objects.map((obj) => {
-        const row = document.createElement("tr");
-        row.className = [obj.focused && "focused", obj.avoided && "avoided"]
-            .filter(Boolean)
-            .join(" ");
-        row.append(
-            objectCell(obj),
-            ...[
-                bearing(obj),
-                ago(obj.age),
-                ago(obj.dwelt_ago),
-                countdown(obj.bored_in),
-            ].map((text) => {
-                const cell = document.createElement("td");
-                cell.textContent = text;
-                return cell;
-            }),
-        );
-        return row;
-    });
-    if (!rows.length) {
-        const row = document.createElement("tr");
-        const cell = document.createElement("td");
-        cell.colSpan = 5;
-        cell.className = "empty";
-        cell.textContent = "Nothing seen lately.";
-        row.append(cell);
-        rows.push(row);
-    }
-    el("world").replaceChildren(...rows);
 }
 
 // A marker's position from a center normalized to [-1, 1] on both axes.

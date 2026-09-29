@@ -15,8 +15,8 @@ tags:
 # Reachy Gaze
 
 A Reachy Mini app that makes the robot look at people and pets. It follows
-whatever it finds with its head, keeps a short memory of what it has seen, and
-looks around the room when there's nothing to watch or it gets bored.
+whatever it finds with its head and looks around the room when there's nothing
+to watch.
 
 Detection runs **off-board** on a machine with a GPU, because the robot's Pi is
 busy with motor control. The robot streams downscaled JPEGs to a detector and
