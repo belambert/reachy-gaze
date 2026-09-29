@@ -161,3 +161,19 @@ def test_random_poses_vary():
         for _ in range(10)
     }
     assert len(yaws) == 10
+
+
+def test_unreachable_poses_are_redrawn():
+    rng, seen = random.Random(0), []
+
+    def reachable(pose):
+        seen.append(pose)
+        return len(seen) == 3
+
+    assert random_pose(rng, 90.0, 30.0, 0.02, reachable) is seen[-1]
+    assert len(seen) == 3
+
+
+def test_a_check_that_never_passes_fails_loudly():
+    with pytest.raises(RuntimeError, match="no reachable head pose"):
+        random_pose(random.Random(0), 90.0, 30.0, 0.02, lambda _: False, tries=5)

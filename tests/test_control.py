@@ -364,3 +364,69 @@ class TestLockingByPhase:
         state = self.run_vision(monkeypatch, Phase.SCANNING)
         assert state.goal is not None and state.label == "cat"
         assert state.stillness.still_for(state.last_seen) is not None
+
+
+@pytest.fixture(scope="module")
+def kin():
+    from reachy_mini.kinematics.analytical_kinematics import AnalyticalKinematics
+
+    return AnalyticalKinematics(automatic_body_yaw=True)
+
+
+class TestReach:
+    """Random poses are checked against the kinematics the daemon uses."""
+
+    def test_neutral_is_reachable(self, kin):
+        from scipy.spatial.transform import Rotation
+
+        from reachy_gaze.main import head_can_reach
+
+        assert head_can_reach(kin, (Rotation.identity(), np.zeros(3)))
+
+    def test_an_extreme_pose_is_not(self, kin):
+        from scipy.spatial.transform import Rotation
+
+        from reachy_gaze.main import head_can_reach
+
+        tilted = Rotation.from_euler("YX", [40, 40], degrees=True)
+        assert not head_can_reach(kin, (tilted, np.array([0.0, 0.0, 0.05])))
+
+    def test_the_configured_ranges_do_hit_unreachable_poses(self, kin):
+        # Otherwise the check would be dead weight and the ranges could widen.
+        import random
+
+        from reachy_gaze.cycle import random_pose
+        from reachy_gaze.main import (
+            RANDOM_SHIFT,
+            RANDOM_TILT,
+            RANDOM_YAW,
+            head_can_reach,
+        )
+
+        rng = random.Random(0)
+        draws = [
+            random_pose(rng, RANDOM_YAW, RANDOM_TILT, RANDOM_SHIFT) for _ in range(200)
+        ]
+        assert not all(head_can_reach(kin, p) for p in draws)
+
+    def test_every_chosen_pose_is_reachable(self, kin):
+        import random
+
+        from reachy_gaze.cycle import random_pose
+        from reachy_gaze.main import (
+            RANDOM_SHIFT,
+            RANDOM_TILT,
+            RANDOM_YAW,
+            head_can_reach,
+        )
+
+        rng = random.Random(0)
+        for _ in range(200):
+            pose = random_pose(
+                rng,
+                RANDOM_YAW,
+                RANDOM_TILT,
+                RANDOM_SHIFT,
+                lambda p: head_can_reach(kin, p),
+            )
+            assert head_can_reach(kin, pose)

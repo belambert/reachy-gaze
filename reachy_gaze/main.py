@@ -20,10 +20,11 @@ import time
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 from reachy_mini import ReachyMini, ReachyMiniApp
+from reachy_mini.kinematics.analytical_kinematics import AnalyticalKinematics
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
-from reachy_gaze.cycle import Cycle, Phase, Stillness, random_pose
+from reachy_gaze.cycle import Cycle, Phase, Pose, Stillness, random_pose
 from reachy_gaze.detector import BACKENDS, Detector, DetectorUnavailable, make_detector
 from reachy_gaze.tracking import (
     CenterFilter,
@@ -61,11 +62,11 @@ IDLE_RESET = 30.0  # seconds of fruitless scanning before a new random pose
 ARRIVE_DEGREES = 2.0  # a random pose is reached once the head is this close...
 ARRIVE_SPEED = 0.1  # ...and turning slower than this, in rad/s
 POSITION_TAU = 0.3  # seconds for the head's position to ease to a new one
-# Random poses keep well inside the head's reach, so the kinematics never has
-# to refuse one; the body turns to help with yaw.
+# Random poses are drawn from these ranges and redrawn until the head can
+# reach them (see head_can_reach); the body turns to help with yaw.
 RANDOM_YAW = 90.0  # degrees either side of straight ahead
-RANDOM_TILT = 15.0  # degrees of pitch and of roll, either way
-RANDOM_SHIFT = 0.01  # metres along each axis, either way
+RANDOM_TILT = 30.0  # degrees of pitch and of roll, either way
+RANDOM_SHIFT = 0.02  # metres along each axis, either way
 
 # Phases in which the head takes a lock on what it sees.
 LOOKING = (Phase.SCANNING, Phase.TRACKING)
@@ -93,6 +94,15 @@ def look_yaw_pitch(head_pose: np.ndarray) -> tuple[float, float]:
     return math.degrees(math.atan2(y, x)), math.degrees(
         math.asin(max(-1.0, min(1.0, z)))
     )
+
+
+def head_can_reach(kin: AnalyticalKinematics, pose: Pose) -> bool:
+    """Whether the head's motors can reach `pose`; collisions aren't checked.
+
+    The same kinematics the daemon uses by default, which answers NaN joints
+    for a pose out of reach; the daemon would then leave the head where it was.
+    """
+    return bool(np.isfinite(kin.ik(pose_matrix(*pose))).all())
 
 
 class Config(BaseModel):
@@ -241,8 +251,15 @@ class ReachyGaze(ReachyMiniApp):
         period = 1.0 / CONTROL_HZ
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
         rng = random.Random()
+        kin = AnalyticalKinematics(automatic_body_yaw=True)
         cycle = Cycle(
-            lambda: random_pose(rng, RANDOM_YAW, RANDOM_TILT, RANDOM_SHIFT),
+            lambda: random_pose(
+                rng,
+                RANDOM_YAW,
+                RANDOM_TILT,
+                RANDOM_SHIFT,
+                reachable=lambda pose: head_can_reach(kin, pose),
+            ),
             HOLD_SECONDS,
             MOVE_TIMEOUT,
             IDLE_RESET,

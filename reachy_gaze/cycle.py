@@ -30,11 +30,27 @@ class Phase(str, Enum):
     TRACKING = "tracking"  # following a target, held through short losses
 
 
-def random_pose(rng: random.Random, yaw: float, tilt: float, shift: float) -> Pose:
-    """Uniform within +/-`yaw` and +/-`tilt` degrees, and +/-`shift` m per axis."""
-    y, p, r = (rng.uniform(-a, a) for a in (yaw, tilt, tilt))
-    position = np.array([rng.uniform(-shift, shift) for _ in range(3)])
-    return Rotation.from_euler("ZYX", [y, p, r], degrees=True), position
+def random_pose(
+    rng: random.Random,
+    yaw: float,
+    tilt: float,
+    shift: float,
+    reachable: Callable[[Pose], bool] = lambda _: True,
+    tries: int = 100,
+) -> Pose:
+    """Uniform within +/-`yaw` and +/-`tilt` degrees, and +/-`shift` m per axis.
+
+    The head's reach isn't a box, so draws are repeated until `reachable`
+    accepts one. Running out of tries means the check itself is broken: even
+    the widest ranges in use pass about two draws in three.
+    """
+    for _ in range(tries):
+        y, p, r = (rng.uniform(-a, a) for a in (yaw, tilt, tilt))
+        position = np.array([rng.uniform(-shift, shift) for _ in range(3)])
+        pose = Rotation.from_euler("ZYX", [y, p, r], degrees=True), position
+        if reachable(pose):
+            return pose
+    raise RuntimeError(f"no reachable head pose in {tries} draws")
 
 
 class Cycle:

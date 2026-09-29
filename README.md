@@ -62,7 +62,7 @@ endpoint (<http://localhost:8042/state>):
 | Phase      | What the head does                                                    | Ends when                                                                                 |
 | ---------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `idle`     | Rests at neutral; tracking is switched off                            | Tracking is switched on                                                                   |
-| `moving`   | Goes to a random orientation and position                             | It arrives (or 5 s pass)                                                                  |
+| `moving`   | Goes to a random orientation and position the head can reach          | It arrives (or 5 s pass)                                                                  |
 | `holding`  | Holds still at that pose, ignoring what it sees                       | 10 s pass                                                                                 |
 | `scanning` | Sweeps side to side from where it is                                  | It locks onto a target, or 30 s pass (new cycle)                                          |
 | `tracking` | Follows the target, moving or not, holding its aim through short gaps | The target is still for the boredom time (new cycle), or lost for 10 s (back to scanning) |
