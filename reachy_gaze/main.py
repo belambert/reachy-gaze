@@ -55,7 +55,7 @@ RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 # The look-around cycle.
 BORED_AFTER = 20.0  # default seconds a still target holds attention; a slider
 STILL_DEGREES = 8.0  # a target within this of where it settled counts as still
-HOLD_SECONDS = 1.5  # pause at each random pose before scanning
+HOLD_SECONDS = 10.0  # pause at each random pose before scanning
 MOVE_TIMEOUT = 5.0  # stop waiting for the head to settle at a random pose
 IDLE_RESET = 30.0  # seconds of fruitless scanning before a new random pose
 ARRIVE_DEGREES = 2.0  # a random pose is reached once the head is this close...
