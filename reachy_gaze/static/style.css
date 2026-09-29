@@ -229,6 +229,11 @@ code {
     border: 2px solid var(--ok);
 }
 
+/* Held on, but no longer detected. */
+.marker.stale {
+    border-color: var(--warn);
+}
+
 /* Also in view, but not the target. */
 .target {
     display: flex;

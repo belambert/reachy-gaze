@@ -4,8 +4,8 @@ const el = (id) => document.getElementById(id);
 const EMOJI = { cat: "🐱", dog: "🐶", bird: "🐦", person: "🧍" };
 const emoji = (label) => EMOJI[label] ?? "🎯";
 
-// Mirrors STALE_AFTER in the app. Only affects how the lock badge reads, so a
-// drift between the two costs nothing but wording.
+// Mirrors STALE_AFTER in the app. Only affects how the lock badge and marker
+// read, so a drift between the two costs nothing but wording.
 const STALE_AFTER = 1.0;
 
 // Rings of equal angle off the camera axis, this many degrees apart.
@@ -111,6 +111,8 @@ function apply(state) {
         marker.style.display = "flex";
         marker.textContent = emoji(state.label);
         marker.title = state.label;
+        // yellow while the head holds its aim on a target it has stopped seeing
+        marker.classList.toggle("stale", state.seen_ago >= STALE_AFTER);
         place(marker, state.center);
     } else {
         marker.style.display = "none";

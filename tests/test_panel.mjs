@@ -177,6 +177,23 @@ const tests = {
         assert.equal(lock.textContent, "searching");
     },
 
+    async "the marker turns yellow once the target stops being detected"() {
+        const h = harness(SOURCE);
+        const marker = h.els.marker;
+        Object.assign(h.app, { locked: true, seen_ago: 0.2, label: "cat", center: [0, 0] });
+        await sleep(400);
+        assert.equal(marker.style.display, "flex");
+        assert.ok(!marker.classList.contains("stale"), "green while seen");
+
+        h.app.seen_ago = 3.0;
+        await sleep(400);
+        assert.ok(marker.classList.contains("stale"), "yellow while only held");
+
+        h.app.seen_ago = 0.1;
+        await sleep(400);
+        assert.ok(!marker.classList.contains("stale"), "green again once re-seen");
+    },
+
     async "the aim readout uses the same arrows"() {
         const h = harness(SOURCE);
         h.app.aim = { yaw: -20.4, pitch: 5 };
