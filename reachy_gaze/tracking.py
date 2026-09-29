@@ -88,10 +88,14 @@ class PoseSmoother:
         self.omega = np.zeros(3)
 
 
-def pose_matrix(rot: Rotation) -> npt.NDArray[np.float64]:
-    """Wrap a rotation as the 4x4 head pose the SDK expects."""
+def pose_matrix(
+    rot: Rotation, position: npt.ArrayLike | None = None
+) -> npt.NDArray[np.float64]:
+    """Wrap a rotation, and optionally a position in metres, as the SDK's 4x4 pose."""
     pose = np.eye(4, dtype=np.float64)
     pose[:3, :3] = rot.as_matrix()
+    if position is not None:
+        pose[:3, 3] = position
     return pose
 
 

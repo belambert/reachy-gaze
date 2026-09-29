@@ -204,3 +204,163 @@ class TestBackendSelection:
 
         with pytest.raises(ValidationError):
             Config(backend="nope")
+
+
+class TestCyclePublishing:
+    """The panel, and anything recording, can tell where the head is in the cycle."""
+
+    def test_starts_idle(self):
+        snap = State().snapshot()
+        assert snap["phase"] == "idle" and snap["cycle"] == 0
+        assert snap["bored_in"] is None and snap["still_for"] is None
+
+    def test_the_first_tick_starts_a_cycle(self, app):
+        state = State()
+        drive(app, FakeMini(), state)
+        snap = state.snapshot()
+        assert snap["phase"] == "moving" and snap["cycle"] == 1
+
+    def test_a_disabled_app_stays_idle(self, app):
+        state = State()
+        state.enabled = False
+        drive(app, FakeMini(), state)
+        assert state.snapshot()["phase"] == "idle"
+
+    def test_boredom_counts_down_while_tracking_a_still_target(self):
+        import time
+
+        from reachy_gaze.cycle import Phase
+
+        state = State()
+        state.phase = Phase.TRACKING
+        state.bored_after = 20.0
+        state.stillness.update(np.array([1.0, 0.0, 0.0]), time.monotonic() - 5.0)
+        snap = state.snapshot()
+        assert snap["still_for"] == pytest.approx(5.0, abs=0.2)
+        assert snap["bored_in"] == pytest.approx(15.0, abs=0.2)
+
+    def test_no_countdown_outside_tracking(self):
+        import time
+
+        state = State()
+        state.stillness.update(np.array([1.0, 0.0, 0.0]), time.monotonic())
+        assert state.snapshot()["bored_in"] is None
+
+
+class TestEnteringAPhase:
+    def cycle_in(self, phase):
+        from reachy_gaze.cycle import Cycle
+
+        cycle = Cycle(lambda: None, 1.0, 1.0, 1.0)
+        cycle.phase, cycle.count = phase, 3
+        return cycle
+
+    def tracking_state(self):
+        from scipy.spatial.transform import Rotation
+
+        state = State()
+        state.goal, state.center, state.label = Rotation.identity(), (0.0, 0.0), "cat"
+        state.stillness.update(np.array([1.0, 0.0, 0.0]), 0.0)
+        return state
+
+    def test_a_new_cycle_drops_the_old_target(self):
+        from reachy_gaze.cycle import Phase
+
+        state = self.tracking_state()
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.MOVING), 7.0)
+        assert state.goal is None and state.center is None and state.label == ""
+        assert state.stillness.still_for(8.0) is None
+        assert (state.phase, state.phase_since, state.cycle) == (Phase.MOVING, 7.0, 3)
+
+    def test_losing_a_target_keeps_the_held_aim_but_not_the_boredom(self):
+        from reachy_gaze.cycle import Phase
+
+        state = self.tracking_state()
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.SCANNING), 7.0)
+        assert state.goal is not None
+        assert state.stillness.still_for(8.0) is None
+
+    def test_starting_to_track_keeps_the_boredom_clock(self):
+        from reachy_gaze.cycle import Phase
+
+        state = self.tracking_state()
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.TRACKING), 7.0)
+        assert state.stillness.still_for(8.0) == 8.0
+
+
+class TestBoredomSetting:
+    def test_accepted_from_the_panel(self):
+        from reachy_gaze.main import Config
+
+        assert Config(bored_after=45.0).bored_after == 45.0
+
+    def test_zero_is_refused(self):
+        from pydantic import ValidationError
+
+        from reachy_gaze.main import Config
+
+        with pytest.raises(ValidationError):
+            Config(bored_after=0.0)
+
+
+class TestLockingByPhase:
+    """End to end through the vision loop: only a scan or a track takes a lock."""
+
+    class Camera:
+        K = np.array([[500.0, 0, 320], [0, 500.0, 240], [0, 0, 1]])
+        D = np.zeros(5)
+
+    class Media:
+        camera = None
+
+        def get_frame(self):
+            return np.zeros((480, 640, 3), np.uint8)
+
+    class Mini:
+        def __init__(self, media):
+            self.media = media
+
+    class Cat:
+        def classes(self):
+            return ["cat"]
+
+        def detect(self, frame, labels, conf):
+            from reachy_gaze.detector import Detection
+
+            return [Detection("cat", 0.9, (300.0, 220.0, 380.0, 300.0))]
+
+    def run_vision(self, monkeypatch, phase, seconds=0.3):
+        import reachy_gaze.main as main
+
+        monkeypatch.setattr(main, "DETECT_HZ", 100.0)
+        monkeypatch.setattr(main, "make_detector", lambda backend, url: self.Cat())
+        media = self.Media()
+        media.camera = self.Camera()
+        state, stop = State(), threading.Event()
+        state.phase = phase
+        vision = threading.Thread(
+            target=ReachyGaze()._track_forever,
+            args=(self.Mini(media), state, stop),
+            daemon=True,
+        )
+        vision.start()
+        stop.wait(seconds)
+        stop.set()
+        vision.join(timeout=2.0)
+        return state
+
+    @pytest.mark.parametrize("phase", ["moving", "holding", "idle"])
+    def test_no_lock_while_not_looking(self, monkeypatch, phase):
+        from reachy_gaze.cycle import Phase
+
+        state = self.run_vision(monkeypatch, Phase(phase))
+        assert state.goal is None
+        assert state.stillness.still_for(0.0) is None
+        assert state.targets, "what is in view is still shown on the panel"
+
+    def test_a_scan_takes_the_lock_and_starts_the_boredom_clock(self, monkeypatch):
+        from reachy_gaze.cycle import Phase
+
+        state = self.run_vision(monkeypatch, Phase.SCANNING)
+        assert state.goal is not None and state.label == "cat"
+        assert state.stillness.still_for(state.last_seen) is not None

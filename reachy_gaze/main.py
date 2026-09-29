@@ -1,6 +1,8 @@
-"""Track a named COCO object with Reachy Mini's head.
+"""Track COCO objects with Reachy Mini's head, in a look-around cycle.
 
-Detection runs off-board (see ``reachy_gaze.server``) because the Pi's CPU is
+Each cycle moves the head to a random pose, holds it, scans until something
+turns up, and follows that until it has sat still long enough to get boring
+(see ``reachy_gaze.cycle``). Detection runs off-board (see ``reachy_gaze.server``) because the Pi's CPU is
 already busy with motor control. Two rates keep that from showing: the vision
 thread re-anchors the target a handful of times a second, while the control loop
 slews the head toward that anchor at 50 Hz.
@@ -11,6 +13,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import random
 import threading
 import time
 
@@ -20,6 +23,7 @@ from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
+from reachy_gaze.cycle import Cycle, Phase, Stillness, random_pose
 from reachy_gaze.detector import BACKENDS, Detector, DetectorUnavailable, make_detector
 from reachy_gaze.tracking import (
     CenterFilter,
@@ -47,6 +51,24 @@ SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
 STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
+
+# The look-around cycle.
+BORED_AFTER = 20.0  # default seconds a still target holds attention; a slider
+STILL_DEGREES = 8.0  # a target within this of where it settled counts as still
+HOLD_SECONDS = 1.5  # pause at each random pose before scanning
+MOVE_TIMEOUT = 5.0  # stop waiting for the head to settle at a random pose
+IDLE_RESET = 30.0  # seconds of fruitless scanning before a new random pose
+ARRIVE_DEGREES = 2.0  # a random pose is reached once the head is this close...
+ARRIVE_SPEED = 0.1  # ...and turning slower than this, in rad/s
+POSITION_TAU = 0.3  # seconds for the head's position to ease to a new one
+# Random poses keep well inside the head's reach, so the kinematics never has
+# to refuse one; the body turns to help with yaw.
+RANDOM_YAW = 90.0  # degrees either side of straight ahead
+RANDOM_TILT = 15.0  # degrees of pitch and of roll, either way
+RANDOM_SHIFT = 0.01  # metres along each axis, either way
+
+# Phases in which the head takes a lock on what it sees.
+LOOKING = (Phase.SCANNING, Phase.TRACKING)
 
 # Which detection backend to use, and where to reach it. Both are prefilled in
 # the control panel and overridable from the environment without editing code.
@@ -83,6 +105,7 @@ class Config(BaseModel):
     scan: bool | None = None
     # A pull of zero would freeze the head, so refuse it rather than obey it.
     pull: float | None = Field(None, gt=0.0, le=200.0)
+    bored_after: float | None = Field(None, gt=0.0, le=600.0)
 
     @field_validator("backend")
     @classmethod
@@ -109,6 +132,7 @@ class State:
         self.backend = DEFAULT_BACKEND
         self.scan = True
         self.pull = MAX_HEAD_PULL
+        self.bored_after = BORED_AFTER
 
         self.goal: Rotation | None = None
         self.head_pose = np.eye(4)  # rotation & position
@@ -124,6 +148,14 @@ class State:
         # angle off the camera axis; None until the first frame arrives.
         self.lens: dict | None = None
 
+        # Where the head is in the look-around cycle, mirrored from the control
+        # loop's Cycle; `cycle` counts random poses, one per cycle.
+        self.phase = Phase.IDLE
+        self.phase_since = time.monotonic()
+        self.cycle = 0
+        # How long the target has stayed put, which is what boredom times.
+        self.stillness = Stillness(STILL_DEGREES)
+
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
         with self.lock:
@@ -131,6 +163,8 @@ class State:
             seen_ago = now - self.last_seen if self.goal is not None else None
             locked = seen_ago is not None and seen_ago < LOST_AFTER
             yaw, pitch = look_yaw_pitch(self.head_pose)
+            tracking = self.phase is Phase.TRACKING
+            still_for = self.stillness.still_for(now) if tracking else None
             return {
                 "enabled": self.enabled,
                 "labels": TRACK_LABELS,
@@ -153,6 +187,16 @@ class State:
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
                 "lens": self.lens,
                 "seen_ago": round(seen_ago, 1) if locked else None,
+                "phase": self.phase.value,
+                "phase_for": round(now - self.phase_since, 1),
+                "cycle": self.cycle,
+                "bored_after": self.bored_after,
+                "still_for": None if still_for is None else round(still_for, 1),
+                "bored_in": (
+                    None
+                    if still_for is None
+                    else round(max(0.0, self.bored_after - still_for), 1)
+                ),
             }
 
 
@@ -192,14 +236,23 @@ class ReachyGaze(ReachyMiniApp):
     def _drive(
         self, mini: ReachyMini, state: State, stop_event: threading.Event
     ) -> None:
-        """Follow the current goal, keeping commanded velocity continuous."""
+        """Run the look-around cycle, keeping commanded velocity continuous."""
         logger.info("Control loop running at %.0f Hz", CONTROL_HZ)
         period = 1.0 / CONTROL_HZ
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
+        rng = random.Random()
+        cycle = Cycle(
+            lambda: random_pose(rng, RANDOM_YAW, RANDOM_TILT, RANDOM_SHIFT),
+            HOLD_SECONDS,
+            MOVE_TIMEOUT,
+            IDLE_RESET,
+        )
+        position = np.zeros(3)
         perk = 0.0
         was_scanning = False
         scan_t0 = 0.0
         scan_phase = 0.0
+        scan_from = Rotation.identity()
         t0 = time.monotonic()
         last = t0
         next_tick = t0
@@ -220,36 +273,55 @@ class ReachyGaze(ReachyMiniApp):
             with state.lock:
                 if pose is not None:
                     state.head_pose = pose
-                goal = state.goal
                 # Not "seen just now": the aim is held for the whole of
                 # LOST_AFTER, so this stays true long after the last sighting.
-                aimed = goal is not None and now - state.last_seen < LOST_AFTER
-                scanning = state.enabled and state.scan and not aimed
+                aimed = state.goal is not None and now - state.last_seen < LOST_AFTER
+                still_for = state.stillness.still_for(now)
+                changed = cycle.update(
+                    now,
+                    enabled=state.enabled,
+                    arrived=self._arrived(smoother, cycle.pose[0]),
+                    aimed=aimed,
+                    bored=still_for is not None and still_for >= state.bored_after,
+                )
+                if changed:
+                    self._enter_phase(state, cycle, now)
+                goal, scan_on = state.goal, state.scan
                 smoother.max_pull = state.pull  # tunable live from the panel
+            phase = cycle.phase
 
             # 0 searching, 1 locked on, eased so the antennas never snap.
-            perk += (float(aimed) - perk) * (1.0 - math.exp(-dt / BLEND_TAU))
+            locked = float(phase is Phase.TRACKING)
+            perk += (locked - perk) * (1.0 - math.exp(-dt / BLEND_TAU))
 
             # Start each scan from wherever the head already is, carrying on the
             # way it was turning. Running the sine off a fixed epoch meant it
             # began at an arbitrary phase, so losing a target swung the head to
             # centre and then out again; ignoring the direction meant it always
             # set off the same way and left one side of the room unswept.
+            scanning = phase is Phase.SCANNING
             if scanning and not was_scanning:  # a scan starts on this tick
-                scan_t0 = now
+                scan_t0, scan_from = now, smoother.rotation
                 scan_phase = self._scan_phase(smoother.rotation, smoother.omega[2])
             was_scanning = scanning
 
-            if not aimed:
-                goal = (
-                    self._scan_pose(now - scan_t0, scan_phase)
-                    if scanning
-                    else Rotation.identity()
+            if phase is Phase.TRACKING and goal is not None:
+                target = goal
+            elif scanning:
+                # with the sweep off, wait where the scan would have begun
+                target = (
+                    self._scan_pose(now - scan_t0, scan_phase) if scan_on else scan_from
                 )
+            else:  # moving to, or holding, the random pose; neutral when idle
+                target = cycle.pose[0]
 
-            assert goal is not None
+            # The position has no velocity to keep continuous, and moves only a
+            # centimetre or two, so a plain exponential ease is enough.
+            position += (cycle.pose[1] - position) * (
+                1.0 - math.exp(-dt / POSITION_TAU)
+            )
             mini.set_target(
-                head=pose_matrix(smoother.step(goal, dt)),
+                head=pose_matrix(smoother.step(target, dt), position),
                 antennas=self._antennas(perk, now - t0),
             )
 
@@ -261,6 +333,27 @@ class ReachyGaze(ReachyMiniApp):
                 time.sleep(delay)
             else:
                 next_tick = time.monotonic()  # fell behind; resync, don't spin
+
+    @staticmethod
+    def _enter_phase(state: State, cycle: Cycle, now: float) -> None:
+        """Publish a new phase, dropping what no longer applies; caller locks."""
+        state.phase, state.phase_since, state.cycle = cycle.phase, now, cycle.count
+        if cycle.phase not in LOOKING:
+            # A fresh cycle must not re-lock onto the target it just tired of.
+            state.goal = state.center = None
+            state.label = ""
+        if cycle.phase is not Phase.TRACKING:
+            state.stillness.reset()
+
+    @staticmethod
+    def _arrived(smoother: PoseSmoother, goal: Rotation) -> bool:
+        """Whether the commanded head has settled on `goal`.
+
+        This is the command, not the measured head, which trails it a little;
+        the hold that follows covers the difference.
+        """
+        off = (goal * smoother.rotation.inv()).magnitude()
+        return off < math.radians(ARRIVE_DEGREES) and smoother.speed < ARRIVE_SPEED
 
     def _track(
         self, mini: ReachyMini, state: State, stop_event: threading.Event
@@ -295,6 +388,7 @@ class ReachyGaze(ReachyMiniApp):
                 enabled, conf = state.enabled, state.conf
                 backend, url = state.backend, state.server_url
                 head_pose = state.head_pose
+                looking = state.phase in LOOKING
 
             # Ahead of the enabled check: a new backend or server should be
             # vetted straight away, not on the next tracking run.
@@ -331,7 +425,11 @@ class ReachyGaze(ReachyMiniApp):
                 continue
 
             height, width = frame.shape[:2]
-            det = selector.select(dets, width, height)
+            # Moving to and holding a random pose are meant to be still, so
+            # nothing seen then takes the lock; the scan that follows will.
+            det = selector.select(dets, width, height) if looking else None
+            if not looking:
+                selector.reset()
             if det is None and not selector.has_target:
                 smoother.reset()
 
@@ -357,7 +455,9 @@ class ReachyGaze(ReachyMiniApp):
                     for d in dets
                     if d is not det
                 ]
-                if det is not None:
+                # Re-checked here: the phase may have moved on during detection,
+                # and a fresh cycle must not inherit this lock.
+                if det is not None and state.phase in LOOKING:
                     center = smoother.update(norm_center(det, width, height))
                     u, v = pixel_center(center, width, height)
                     # Aim against the pose the frame was captured at, so a late
@@ -366,6 +466,9 @@ class ReachyGaze(ReachyMiniApp):
                         look_at_image_pose(u, v, K, D, head_pose, T_head_cam)[:3, :3]
                     )
                     state.last_seen = time.monotonic()
+                    state.stillness.update(
+                        state.goal.as_matrix()[:, 0], state.last_seen
+                    )
                     state.center = center
                     state.label = det.label
 

@@ -24,6 +24,12 @@
             <output id="pull-value"></output>
         </label>
 
+        <label class="row">
+            <span>Boredom</span>
+            <input type="range" id="bored_after" min="5" max="120" step="1">
+            <output id="bored_after-value"></output>
+        </label>
+
         <div class="row toggles">
             <label class="toggle">
                 <input type="checkbox" id="enabled" checked>
@@ -31,7 +37,7 @@
             </label>
             <label class="toggle">
                 <input type="checkbox" id="scan" checked>
-                <span>Scan when lost</span>
+                <span>Sweep when searching</span>
             </label>
         </div>
 
@@ -47,12 +53,14 @@
         </div>
 
         <p class="hint">
-            Looking for <span id="labels"></span>. Lower response is smoother, laggier.
+            Looking for <span id="labels"></span>. Lower response is smoother, laggier. Boredom is how many seconds a
+            still target holds its attention before it looks somewhere new.
         </p>
     </section>
 
     <section class="card status">
         <div class="badges">
+            <span class="badge" id="badge-phase">idle</span>
             <span class="badge" id="badge-detector">detector</span>
             <span class="badge" id="badge-lock">lock</span>
             <span class="badge" id="badge-fps">&ndash; fps</span>

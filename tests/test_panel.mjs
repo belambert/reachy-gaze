@@ -42,7 +42,8 @@ function makeEl(id) {
 
 function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
-        "labels", "conf", "conf-value", "pull", "pull-value", "enabled", "scan",
+        "labels", "conf", "conf-value", "pull", "pull-value", "bored_after",
+        "bored_after-value", "badge-phase", "enabled", "scan",
         "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
         "badge-fps", "marker", "error", "aim", "targets",
         "view", "rings",
@@ -53,6 +54,7 @@ function harness(source, { stateStatus = 200 } = {}) {
         conf: 0.4, pull: 20, server_url: "http://old:8100", scan: true,
         locked: false, detector_ok: true, error: "", fps: 0, center: null,
         seen_ago: null, backend: "triton",
+        phase: "idle", cycle: 0, phase_for: 0, bored_after: 20, bored_in: null,
         backends: [
             { key: "triton", label: "Triton (vision-server)", default_url: "localhost:8101" },
             { key: "builtin", label: "Built-in server", default_url: "http://localhost:8100" },
@@ -282,6 +284,39 @@ const tests = {
 
         assert.deepEqual(h.posts.at(-1), { pull: 12 }, "must not resend conf");
         assert.equal(h.app.conf, 0.4, "conf must be untouched");
+    },
+
+    async "the phase badge follows the cycle"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+        const node = h.els["badge-phase"];
+        assert.equal(node.textContent, "idle");
+
+        Object.assign(h.app, { phase: "scanning", cycle: 3, phase_for: 12.4 });
+        await sleep(400);
+        assert.equal(node.textContent, "cycle 3: scanning 12s");
+
+        Object.assign(h.app, { phase: "tracking", bored_in: 7.2 });
+        await sleep(400);
+        assert.equal(node.textContent, "cycle 3: tracking, bored in 8s");
+        assert.ok(node.classList.contains("ok"));
+
+        Object.assign(h.app, { phase: "moving", cycle: 4, bored_in: null });
+        await sleep(400);
+        assert.equal(node.textContent, "cycle 4: moving");
+        assert.ok(!node.classList.contains("ok"));
+    },
+
+    async "the boredom slider writes its own field and shows seconds"() {
+        const h = harness(SOURCE);
+        await sleep(30);
+        assert.equal(h.els["bored_after-value"].textContent, "20s");
+
+        h.els.bored_after.value = 45;
+        h.els.bored_after.fire("input");
+        await sleep(300);
+        assert.deepEqual(h.posts.at(-1), { bored_after: 45 });
+        assert.equal(h.els["bored_after-value"].textContent, "45s");
     },
 
     async "Enter applies the URL"() {

@@ -69,6 +69,7 @@ function apply(state) {
 
     if (!dirty.has("conf")) el("conf").value = state.conf;
     if (!dirty.has("pull")) el("pull").value = state.pull;
+    if (!dirty.has("bored_after")) el("bored_after").value = state.bored_after;
     if (!dirty.has("enabled")) el("enabled").checked = state.enabled;
     if (!dirty.has("scan")) el("scan").checked = state.scan;
     if (!dirty.has("server_url")) el("server-url").value = state.server_url;
@@ -83,6 +84,7 @@ function apply(state) {
 
     el("conf-value").textContent = Number(el("conf").value).toFixed(2);
     el("pull-value").textContent = Number(el("pull").value).toFixed(0);
+    el("bored_after-value").textContent = `${Number(el("bored_after").value).toFixed(0)}s`;
     el("server-url").classList.toggle("unsaved", dirty.has("server_url"));
 
     badge(
@@ -102,6 +104,7 @@ function apply(state) {
     }
 
     el("badge-fps").textContent = state.detector_ok ? `${state.fps} fps` : "– fps";
+    badge("badge-phase", state.phase === "tracking" ? "ok" : "", phaseText(state));
 
     const marker = el("marker");
     if (state.center && state.locked) {
@@ -117,6 +120,16 @@ function apply(state) {
     el("aim").textContent = aimText(state.aim);
 
     el("error").textContent = state.error || "";
+}
+
+// Where the head is in the look-around cycle, with whatever is counting down.
+function phaseText({ phase, cycle, phase_for, bored_in }) {
+    if (!phase || phase === "idle") return "idle";
+    let text = `cycle ${cycle}: ${phase}`;
+    if (phase === "scanning") text += ` ${Math.round(phase_for)}s`;
+    // ceil, so it reads 1s rather than 0s until it actually runs out
+    if (phase === "tracking" && bored_in != null) text += `, bored in ${Math.ceil(bored_in)}s`;
+    return text;
 }
 
 // Head aim in words: +yaw is left, +pitch is up (see look_yaw_pitch in main.py).
@@ -227,11 +240,11 @@ function applyUrl() {
 
 async function init() {
     // Writing on every drag event would flood the app; the label tracks live.
-    for (const [id, digits] of [["conf", 2], ["pull", 0]]) {
+    for (const [id, digits, unit] of [["conf", 2, ""], ["pull", 0, ""], ["bored_after", 0, "s"]]) {
         let timer;
         el(id).addEventListener("input", (e) => {
             dirty.add(id);
-            el(`${id}-value`).textContent = Number(e.target.value).toFixed(digits);
+            el(`${id}-value`).textContent = Number(e.target.value).toFixed(digits) + unit;
             clearTimeout(timer);
             timer = setTimeout(() => write({ [id]: Number(e.target.value) }), 150);
         });
