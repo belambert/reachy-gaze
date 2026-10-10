@@ -37,8 +37,11 @@ def random_pose(
     shift: float,
     reachable: Callable[[Pose], bool] = lambda _: True,
     tries: int = 100,
+    lift: float = 0.0,
 ) -> Pose:
     """Uniform within +/-`yaw` and +/-`tilt` degrees, and +/-`shift` m per axis.
+
+    `lift` raises the whole position range in z, keeping the head off the body.
 
     The head's reach isn't a box, so draws are repeated until `reachable`
     accepts one. Running out of tries means the check itself is broken: even
@@ -47,6 +50,7 @@ def random_pose(
     for _ in range(tries):
         y, p, r = (rng.uniform(-a, a) for a in (yaw, tilt, tilt))
         position = np.array([rng.uniform(-shift, shift) for _ in range(3)])
+        position[2] += lift
         pose = Rotation.from_euler("ZYX", [y, p, r], degrees=True), position
         if reachable(pose):
             return pose
@@ -66,20 +70,23 @@ class Cycle:
         hold: float,
         move_timeout: float,
         idle_reset: float,
+        rest: npt.ArrayLike = (0.0, 0.0, 0.0),
     ) -> None:
         """Hold each random pose `hold` s; scan `idle_reset` s before a new one.
 
         `move_timeout` ends a move that never settles, e.g. a pose the
-        kinematics can't quite reach, so the cycle can't stall there.
+        kinematics can't quite reach, so the cycle can't stall there. The idle
+        head rests at orientation neutral and position `rest`.
         """
         self.pose_fn = pose_fn
         self.hold = hold
         self.move_timeout = move_timeout
         self.idle_reset = idle_reset
+        self.rest = np.asarray(rest, dtype=np.float64)
         self.phase = Phase.IDLE
         self.since = 0.0
         self.count = 0  # cycles started; a new random pose each time
-        self.pose: Pose = (Rotation.identity(), np.zeros(3))
+        self.pose: Pose = (Rotation.identity(), self.rest)
 
     def update(
         self, now: float, *, enabled: bool, arrived: bool, aimed: bool, bored: bool
@@ -93,7 +100,7 @@ class Cycle:
             self.count += 1
             self.pose = self.pose_fn()
         elif nxt is Phase.IDLE:
-            self.pose = (Rotation.identity(), np.zeros(3))
+            self.pose = (Rotation.identity(), self.rest)
         return True
 
     def _next(
