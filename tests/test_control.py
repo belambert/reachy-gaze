@@ -2,6 +2,7 @@ import threading
 
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from reachy_gaze.main import ReachyGaze, State
 
@@ -301,6 +302,34 @@ class TestBoredomSetting:
 
         with pytest.raises(ValidationError):
             Config(bored_after=0.0)
+
+
+class TestYawLimit:
+    def test_accepted_from_the_panel(self):
+        from reachy_gaze.main import Config
+
+        assert Config(yaw_limit=45.0).yaw_limit == 45.0
+
+    def test_beyond_the_body_is_refused(self):
+        from pydantic import ValidationError
+
+        from reachy_gaze.main import Config
+
+        with pytest.raises(ValidationError):
+            Config(yaw_limit=170.0)
+
+    def test_clamp_keeps_pitch_and_caps_yaw(self):
+        from reachy_gaze.main import clamp_yaw
+
+        rot = Rotation.from_euler("ZYX", [-80.0, 10.0, 5.0], degrees=True)
+        out = clamp_yaw(rot, 30.0).as_euler("ZYX", degrees=True)
+        assert out == pytest.approx([-30.0, 10.0, 5.0])
+
+    def test_clamp_leaves_inside_poses_alone(self):
+        from reachy_gaze.main import clamp_yaw
+
+        rot = Rotation.from_euler("Z", 20.0, degrees=True)
+        assert clamp_yaw(rot, 30.0) is rot
 
 
 class TestLockingByPhase:
