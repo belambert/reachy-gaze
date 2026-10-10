@@ -43,9 +43,9 @@ function makeEl(id) {
 function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "bored_after",
-        "bored_after-value", "badge-phase", "enabled", "scan",
+        "bored_after-value", "yaw_limit", "yaw_limit-value", "badge-phase", "enabled", "scan",
         "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
-        "badge-fps", "marker", "error", "aim", "targets",
+        "badge-fps", "marker", "crop", "icon", "error", "aim", "targets",
         "view", "rings",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
@@ -53,6 +53,7 @@ function harness(source, { stateStatus = 200 } = {}) {
         enabled: true, labels: ["person", "cat", "dog", "bird"], label: "",
         conf: 0.4, pull: 20, server_url: "http://old:8100", scan: true,
         locked: false, detector_ok: true, error: "", fps: 0, center: null,
+        box: null, crop_id: 0, yaw_limit: 90,
         seen_ago: null, backend: "triton",
         phase: "idle", cycle: 0, phase_for: 0, bored_after: 20, bored_in: null,
         backends: [
@@ -180,9 +181,9 @@ const tests = {
     async "the marker turns yellow once the target stops being detected"() {
         const h = harness(SOURCE);
         const marker = h.els.marker;
-        Object.assign(h.app, { locked: true, seen_ago: 0.2, label: "cat", center: [0, 0] });
+        Object.assign(h.app, { locked: true, seen_ago: 0.2, label: "cat", center: [0, 0], box: [0.4, 0.4, 0.5, 0.5], crop_id: 1 });
         await sleep(400);
-        assert.equal(marker.style.display, "flex");
+        assert.equal(marker.style.display, "block");
         assert.ok(!marker.classList.contains("stale"), "green while seen");
 
         h.app.seen_ago = 3.0;
@@ -192,6 +193,23 @@ const tests = {
         h.app.seen_ago = 0.1;
         await sleep(400);
         assert.ok(!marker.classList.contains("stale"), "green again once re-seen");
+    },
+
+    async "the target box shows the crop, with the icon on the side that has room"() {
+        const h = harness(SOURCE);
+        Object.assign(h.app, {
+            locked: true, seen_ago: 0.2, label: "cat", center: [0, 0],
+            box: [0.1, 0.2, 0.3, 0.4], crop_id: 7,
+        });
+        await sleep(400);
+        assert.equal(h.els.crop.src, "/crop?v=7");
+        assert.equal(h.els.icon.textContent, "🐱");
+        assert.equal(h.els.marker.style.left, "10%");
+        assert.ok(!h.els.marker.classList.contains("flip"));
+
+        h.app.box = [0.6, 0.2, 0.9, 0.4];
+        await sleep(400);
+        assert.ok(h.els.marker.classList.contains("flip"), "near the right edge");
     },
 
     async "the aim readout uses the same arrows"() {

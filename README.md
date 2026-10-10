@@ -50,6 +50,9 @@ Install it on the robot as a Reachy Mini app, then open the control panel at
 <http://localhost:8042> to pick the backend and detector address. The defaults
 come from `REACHY_GAZE_BACKEND` and `REACHY_GAZE_SERVER_URL` if set.
 
+The panel's view draws the target's bounding box filled with the frame it was
+captured from (served at `/crop`), with the class icon beside it.
+
 Tuning constants, including which classes it looks for, live at the top of
 `reachy_gaze/main.py`. New detector backends go in the `BACKENDS` table in
 `reachy_gaze/detector.py`.

@@ -459,3 +459,25 @@ class TestReach:
                 lambda p: head_can_reach(kin, p),
             )
             assert head_can_reach(kin, pose)
+
+
+class TestTargetCrop:
+    def test_crop_is_a_jpeg_of_the_box(self):
+        import io
+
+        import numpy as np
+        from PIL import Image
+
+        from reachy_gaze.detector import crop_jpeg
+
+        frame = np.zeros((480, 640, 3), np.uint8)
+        frame[100:200, 300:500] = (0, 0, 255)  # BGR red
+        img = Image.open(io.BytesIO(crop_jpeg(frame, (300, 100, 500, 200))))
+        assert img.size == (160, 80)
+        r, g, b = img.getpixel((80, 40))
+        assert r > 200 and g < 50 and b < 50
+
+    def test_box_is_exposed_as_fractions(self):
+        from reachy_gaze.main import _fractions
+
+        assert _fractions((0, 0, 639, 479), 640, 480) == (0.0, 0.0, 1.0, 1.0)
