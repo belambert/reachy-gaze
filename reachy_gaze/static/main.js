@@ -70,6 +70,7 @@ function apply(state) {
     if (!dirty.has("conf")) el("conf").value = state.conf;
     if (!dirty.has("pull")) el("pull").value = state.pull;
     if (!dirty.has("bored_after")) el("bored_after").value = state.bored_after;
+    if (!dirty.has("yaw_limit")) el("yaw_limit").value = state.yaw_limit;
     if (!dirty.has("enabled")) el("enabled").checked = state.enabled;
     if (!dirty.has("scan")) el("scan").checked = state.scan;
     if (!dirty.has("server_url")) el("server-url").value = state.server_url;
@@ -85,6 +86,7 @@ function apply(state) {
     el("conf-value").textContent = Number(el("conf").value).toFixed(2);
     el("pull-value").textContent = Number(el("pull").value).toFixed(0);
     el("bored_after-value").textContent = `${Number(el("bored_after").value).toFixed(0)}s`;
+    el("yaw_limit-value").textContent = `±${Number(el("yaw_limit").value).toFixed(0)}°`;
     el("server-url").classList.toggle("unsaved", dirty.has("server_url"));
 
     badge(
@@ -242,7 +244,7 @@ function applyUrl() {
 
 async function init() {
     // Writing on every drag event would flood the app; the label tracks live.
-    for (const [id, digits, unit] of [["conf", 2, ""], ["pull", 0, ""], ["bored_after", 0, "s"]]) {
+    for (const [id, digits, unit] of [["conf", 2, ""], ["pull", 0, ""], ["bored_after", 0, "s"], ["yaw_limit", 0, "°"]]) {
         let timer;
         el(id).addEventListener("input", (e) => {
             dirty.add(id);

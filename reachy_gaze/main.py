@@ -105,6 +105,16 @@ def head_can_reach(kin: AnalyticalKinematics, pose: Pose) -> bool:
     return bool(np.isfinite(kin.ik(pose_matrix(*pose))).all())
 
 
+def clamp_yaw(rot: Rotation, limit: float) -> Rotation:
+    """`rot` with its yaw held within +/-`limit` degrees, pitch and roll kept."""
+    yaw, pitch, roll = rot.as_euler("ZYX", degrees=True)
+    if abs(yaw) <= limit:
+        return rot
+    return Rotation.from_euler(
+        "ZYX", [math.copysign(limit, yaw), pitch, roll], degrees=True
+    )
+
+
 class Config(BaseModel):
     """Settings the control panel can change while the app runs."""
 
@@ -116,6 +126,8 @@ class Config(BaseModel):
     # A pull of zero would freeze the head, so refuse it rather than obey it.
     pull: float | None = Field(None, gt=0.0, le=200.0)
     bored_after: float | None = Field(None, gt=0.0, le=600.0)
+    # Half-width of left/right travel; the body's yaw joint stops at 160.
+    yaw_limit: float | None = Field(None, ge=10.0, le=160.0)
 
     @field_validator("backend")
     @classmethod
@@ -143,6 +155,7 @@ class State:
         self.scan = True
         self.pull = MAX_HEAD_PULL
         self.bored_after = BORED_AFTER
+        self.yaw_limit = SCAN_DEGREES
 
         self.goal: Rotation | None = None
         self.head_pose = np.eye(4)  # rotation & position
@@ -201,6 +214,7 @@ class State:
                 "phase_for": round(now - self.phase_since, 1),
                 "cycle": self.cycle,
                 "bored_after": self.bored_after,
+                "yaw_limit": self.yaw_limit,
                 "still_for": None if still_for is None else round(still_for, 1),
                 "bored_in": (
                     None
@@ -255,7 +269,7 @@ class ReachyGaze(ReachyMiniApp):
         cycle = Cycle(
             lambda: random_pose(
                 rng,
-                RANDOM_YAW,
+                state.yaw_limit,  # read under state.lock, via cycle.update
                 RANDOM_TILT,
                 RANDOM_SHIFT,
                 reachable=lambda pose: head_can_reach(kin, pose),
@@ -304,6 +318,7 @@ class ReachyGaze(ReachyMiniApp):
                 if changed:
                     self._enter_phase(state, cycle, now)
                 goal, scan_on = state.goal, state.scan
+                limit = state.yaw_limit
                 smoother.max_pull = state.pull  # tunable live from the panel
             phase = cycle.phase
 
@@ -319,7 +334,9 @@ class ReachyGaze(ReachyMiniApp):
             scanning = phase is Phase.SCANNING
             if scanning and not was_scanning:  # a scan starts on this tick
                 scan_t0, scan_from = now, smoother.rotation
-                scan_phase = self._scan_phase(smoother.rotation, smoother.omega[2])
+                scan_phase = self._scan_phase(
+                    smoother.rotation, smoother.omega[2], limit
+                )
             was_scanning = scanning
 
             if phase is Phase.TRACKING and goal is not None:
@@ -327,10 +344,13 @@ class ReachyGaze(ReachyMiniApp):
             elif scanning:
                 # with the sweep off, wait where the scan would have begun
                 target = (
-                    self._scan_pose(now - scan_t0, scan_phase) if scan_on else scan_from
+                    self._scan_pose(now - scan_t0, scan_phase, limit)
+                    if scan_on
+                    else scan_from
                 )
             else:  # moving to, or holding, the random pose; neutral when idle
                 target = cycle.pose[0]
+            target = clamp_yaw(target, limit)  # also catches a lowered limit
 
             # The position has no velocity to keep continuous, and moves only a
             # centimetre or two, so a plain exponential ease is enough.
@@ -514,7 +534,9 @@ class ReachyGaze(ReachyMiniApp):
             logger.info("%s detects all of %s", where, ", ".join(TRACK_LABELS))
 
     @staticmethod
-    def _scan_pose(t: float, phase: float = 0.0) -> Rotation:
+    def _scan_pose(
+        t: float, phase: float = 0.0, limit: float = SCAN_DEGREES
+    ) -> Rotation:
         """A slow, level look from side to side, to find a target again.
 
         `t` is seconds since this scan began, not since the app started: the
@@ -522,11 +544,13 @@ class ReachyGaze(ReachyMiniApp):
         The head is held level; a pitch left over from tracking is eased out
         once by the follower rather than swept up and down.
         """
-        yaw = SCAN_DEGREES * math.sin(2 * math.pi * SCAN_HZ * t + phase)
+        yaw = limit * math.sin(2 * math.pi * SCAN_HZ * t + phase)
         return Rotation.from_euler("Z", yaw, degrees=True)
 
     @staticmethod
-    def _scan_phase(rotation: Rotation, rate: float = 0.0) -> float:
+    def _scan_phase(
+        rotation: Rotation, rate: float = 0.0, limit: float = SCAN_DEGREES
+    ) -> float:
         """The scan phase whose starting yaw matches `rotation`, heading on.
 
         `rate` is the head's current yaw velocity. The scan carries on the way
@@ -537,7 +561,7 @@ class ReachyGaze(ReachyMiniApp):
         """
         yaw, _, _ = rotation.as_euler("ZYX", degrees=True)
         heading = rate if abs(rate) > 1e-3 else yaw
-        return ReachyGaze._phase_at(yaw, SCAN_DEGREES, heading)
+        return ReachyGaze._phase_at(yaw, limit, heading)
 
     @staticmethod
     def _phase_at(angle: float, amplitude: float, heading: float = 1.0) -> float:

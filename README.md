@@ -71,6 +71,10 @@ A target counts as still while it stays within a few degrees of where it
 settled, so a moving target is followed indefinitely. The boredom time is the
 panel's Boredom slider (20 s by default).
 
+The Travel slider limits how far the head turns left and right of straight
+ahead (90° by default, up to 160°). It bounds the scan, the random poses and
+tracking alike.
+
 Alongside `phase`, `/state` reports `cycle` (a count that goes up with each
 random pose), `phase_for` (seconds in the current phase), and while tracking,
 `still_for` and `bored_in` (seconds).
