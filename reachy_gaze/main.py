@@ -74,6 +74,11 @@ POSITION_TAU = 0.3  # seconds for the head's position to ease to a new one
 RANDOM_YAW = 90.0  # degrees either side of straight ahead
 RANDOM_TILT = 30.0  # degrees of pitch and of roll, either way
 RANDOM_SHIFT = 0.02  # metres along each axis, either way
+# The head scrapes the body when it sits low, so it rests and roams this far up
+# (metres); random heights then run from neutral to twice the shift.
+HEAD_LIFT = 0.02
+
+REST_POSITION = np.array([0.0, 0.0, HEAD_LIFT])
 
 # Phases in which the head takes a lock on what it sees.
 LOOKING = (Phase.SCANNING, Phase.TRACKING)
@@ -296,12 +301,14 @@ class ReachyGaze(ReachyMiniApp):
                 RANDOM_TILT,
                 RANDOM_SHIFT,
                 reachable=lambda pose: head_can_reach(kin, pose),
+                lift=HEAD_LIFT,
             ),
             HOLD_SECONDS,
             MOVE_TIMEOUT,
             IDLE_RESET,
+            rest=REST_POSITION,
         )
-        position = np.zeros(3)
+        position = REST_POSITION.copy()
         perk = 0.0
         was_scanning = False
         scan_t0 = 0.0

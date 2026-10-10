@@ -177,3 +177,17 @@ def test_unreachable_poses_are_redrawn():
 def test_a_check_that_never_passes_fails_loudly():
     with pytest.raises(RuntimeError, match="no reachable head pose"):
         random_pose(random.Random(0), 90.0, 30.0, 0.02, lambda _: False, tries=5)
+
+
+def test_lift_raises_the_height_range():
+    rng = random.Random(0)
+    zs = [random_pose(rng, 10.0, 10.0, 0.02, lift=0.02)[1][2] for _ in range(200)]
+    assert min(zs) >= 0.0 and max(zs) > 0.03
+
+
+def test_idle_rests_at_the_given_position():
+    cycle = Cycle(lambda: POSE, 1.0, 1.0, 1.0, rest=(0.0, 0.0, 0.02))
+    assert cycle.pose[1][2] == 0.02
+    cycle.update(0.0, **facts())
+    cycle.update(1.0, **facts(enabled=False))
+    assert cycle.pose[1][2] == 0.02
