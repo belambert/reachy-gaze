@@ -18,6 +18,7 @@ import threading
 import time
 
 import numpy as np
+from fastapi import Response
 from pydantic import BaseModel, Field, field_validator
 from reachy_mini import ReachyMini, ReachyMiniApp
 from reachy_mini.kinematics.analytical_kinematics import AnalyticalKinematics
@@ -25,7 +26,13 @@ from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
 from reachy_gaze.cycle import Cycle, Phase, Pose, Stillness, random_pose
-from reachy_gaze.detector import BACKENDS, Detector, DetectorUnavailable, make_detector
+from reachy_gaze.detector import (
+    BACKENDS,
+    Detector,
+    DetectorUnavailable,
+    crop_jpeg,
+    make_detector,
+)
 from reachy_gaze.tracking import (
     CenterFilter,
     PoseSmoother,
@@ -105,6 +112,15 @@ def head_can_reach(kin: AnalyticalKinematics, pose: Pose) -> bool:
     return bool(np.isfinite(kin.ik(pose_matrix(*pose))).all())
 
 
+def _fractions(
+    box: tuple[float, float, float, float], width: int, height: int
+) -> tuple[float, float, float, float]:
+    """`box` in pixels as fractions of the frame, the panel's own mapping."""
+    x1, y1, x2, y2 = box
+    w, h = max(width - 1, 1), max(height - 1, 1)
+    return (x1 / w, y1 / h, x2 / w, y2 / h)
+
+
 def clamp_yaw(rot: Rotation, limit: float) -> Rotation:
     """`rot` with its yaw held within +/-`limit` degrees, pitch and roll kept."""
     yaw, pitch, roll = rot.as_euler("ZYX", degrees=True)
@@ -164,6 +180,11 @@ class State:
         self.error = ""
         self.fps = 0.0
         self.center: tuple[float, float] | None = None
+        # The target's box as fractions of the frame (x1, y1, x2, y2), and a
+        # JPEG of what is inside it; `crop_id` changes whenever the crop does.
+        self.box: tuple[float, float, float, float] | None = None
+        self.crop: bytes | None = None
+        self.crop_id = 0
         # Every other box in view, so the panel can show what the head is
         # ignoring: {"label", "center": [x, y]} in the same normalized coords.
         self.targets: list[dict] = []
@@ -206,6 +227,8 @@ class State:
                 "error": self.error,
                 "fps": round(self.fps, 1),
                 "center": self.center,
+                "box": self.box,
+                "crop_id": self.crop_id,
                 "targets": self.targets,
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
                 "lens": self.lens,
@@ -377,7 +400,7 @@ class ReachyGaze(ReachyMiniApp):
         state.phase, state.phase_since, state.cycle = cycle.phase, now, cycle.count
         if cycle.phase not in LOOKING:
             # A fresh cycle must not re-lock onto the target it just tired of.
-            state.goal = state.center = None
+            state.goal = state.center = state.box = state.crop = None
             state.label = ""
         if cycle.phase is not Phase.TRACKING:
             state.stillness.reset()
@@ -470,6 +493,8 @@ class ReachyGaze(ReachyMiniApp):
             if det is None and not selector.has_target:
                 smoother.reset()
 
+            crop = crop_jpeg(frame, det.box) if det is not None and looking else None
+
             with state.lock:
                 state.lens = {
                     "fx": float(K[0, 0]),
@@ -507,6 +532,8 @@ class ReachyGaze(ReachyMiniApp):
                         state.goal.as_matrix()[:, 0], state.last_seen
                     )
                     state.center = center
+                    state.box = _fractions(det.box, width, height)
+                    state.crop, state.crop_id = crop, state.crop_id + 1
                     state.label = det.label
 
             elapsed = time.monotonic() - started
@@ -593,14 +620,21 @@ class ReachyGaze(ReachyMiniApp):
         def get_state() -> dict:
             return state.snapshot()
 
+        @self.settings_app.get("/crop")
+        def get_crop() -> Response:
+            with state.lock:
+                crop = state.crop
+            if crop is None:
+                return Response(status_code=404)
+            return Response(crop, media_type="image/jpeg")
+
         @self.settings_app.post("/config")
         def set_config(config: Config) -> dict:
             with state.lock:
                 for field, value in config.model_dump(exclude_none=True).items():
                     setattr(state, field, value)
                 if config.enabled is False:
-                    state.goal = None
-                    state.center = None
+                    state.goal = state.center = state.box = state.crop = None
                     state.targets = []
             return state.snapshot()
 

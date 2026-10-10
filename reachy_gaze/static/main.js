@@ -28,6 +28,9 @@ const dirty = new Set();
 let backends = [];
 let backendKeys = "";
 
+// The crop currently shown in the target box.
+let cropId = -1;
+
 // The lens the rings were last drawn for; they only change if it does.
 let lensKey = "";
 
@@ -109,13 +112,25 @@ function apply(state) {
     badge("badge-phase", state.phase === "tracking" ? "ok" : "", phaseText(state));
 
     const marker = el("marker");
-    if (state.center && state.locked) {
-        marker.style.display = "flex";
-        marker.textContent = emoji(state.label);
+    if (state.box && state.locked) {
+        const [x1, y1, x2, y2] = state.box.map((v) => v * 100);
+        Object.assign(marker.style, {
+            display: "block",
+            left: `${x1}%`,
+            top: `${y1}%`,
+            width: `${x2 - x1}%`,
+            height: `${y2 - y1}%`,
+        });
+        el("icon").textContent = emoji(state.label);
         marker.title = state.label;
         // yellow while the head holds its aim on a target it has stopped seeing
         marker.classList.toggle("stale", state.seen_ago >= STALE_AFTER);
-        place(marker, state.center);
+        // the icon sits beside the box, on whichever side has room
+        marker.classList.toggle("flip", x2 > 70);
+        if (state.crop_id !== cropId) {
+            cropId = state.crop_id;
+            el("crop").src = `/crop?v=${cropId}`;
+        }
     } else {
         marker.style.display = "none";
     }

@@ -57,6 +57,23 @@ class Detection:
         return max(0.0, x2 - x1) * max(0.0, y2 - y1)
 
 
+def crop_jpeg(
+    frame: npt.NDArray[np.uint8],
+    box: tuple[float, float, float, float],
+    max_side: int = 160,
+) -> bytes:
+    """JPEG of `box` cut from a BGR frame, shrunk so its long side is `max_side`."""
+    height, width = frame.shape[:2]
+    x1, y1, x2, y2 = box
+    x1, x2 = (int(max(0, min(width - 1, v))) for v in (x1, x2))
+    y1, y2 = (int(max(0, min(height - 1, v))) for v in (y1, y2))
+    img = Image.fromarray(frame[y1 : max(y2, y1 + 1), x1 : max(x2, x1 + 1), ::-1])
+    img.thumbnail((max_side, max_side))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=80)
+    return buf.getvalue()
+
+
 class Detector(Protocol):
     """Anything that can name its vocabulary and find boxes in a frame."""
 

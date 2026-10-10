@@ -207,8 +207,7 @@ code {
     transform: translateY(-100%);
 }
 
-/* One disc per box in view, the type shown as an emoji inside it. */
-.marker,
+/* The other boxes in view: a disc each, the type shown as an emoji inside. */
 .target {
     position: absolute;
     align-items: center;
@@ -223,10 +222,37 @@ code {
     transition: left 0.15s linear, top 0.15s linear;
 }
 
-/* The one the head is aimed at; shown by the JS when locked. */
+/* The target: its bounding box, filled with the captured crop. */
 .marker {
+    position: absolute;
     display: none;
     border: 2px solid var(--ok);
+    background: var(--bg);
+    transition: left 0.15s linear, top 0.15s linear, width 0.15s linear,
+        height 0.15s linear;
+}
+
+.marker img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+}
+
+/* The type as an emoji, beside the box rather than over the crop. */
+.marker .icon {
+    position: absolute;
+    top: 0;
+    left: 100%;
+    margin-left: 4px;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.marker.flip .icon {
+    left: auto;
+    right: 100%;
+    margin: 0 4px 0 0;
 }
 
 /* Held on, but no longer detected. */
