@@ -31,6 +31,16 @@ class TestSelector:
         # A 4px box is noise, not a cat.
         assert TargetSelector().select([box(320, 240, size=4)], W, H) is None
 
+    def test_ignores_small_boxes_while_following(self):
+        sel = TargetSelector()
+        sel.select([box(320, 240, size=100)], W, H)
+        assert sel.select([box(322, 240, size=20)], W, H) is None
+
+    def test_a_small_box_does_not_mask_a_larger_lower_priority_one(self):
+        sel = TargetSelector(["cat", "person"])
+        cat, person = box(100, 100, size=10), box(400, 240, size=200, label="person")
+        assert sel.select([cat, person], W, H) is person
+
     def test_follows_nearest_once_locked(self):
         sel = TargetSelector()
         sel.select([box(100, 240, size=200)], W, H)

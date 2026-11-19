@@ -115,7 +115,7 @@ class TargetSelector:
     def __init__(
         self,
         priority: list[str] | None = None,
-        min_area_frac: float = 0.002,
+        min_area_frac: float = 0.01,
         max_jump: float = 0.5,
         max_misses: int = 12,
         upgrade_after: int = 3,
@@ -135,6 +135,9 @@ class TargetSelector:
         self, dets: list[Detection], width: int, height: int
     ) -> Detection | None:
         """Pick the detection to aim at, or None when none is plausible."""
+        # before ranking, so a speck of a preferred class can't mask a real one
+        min_area = self._min_area_frac * width * height
+        dets = [d for d in dets if d.area >= min_area]
         if not dets:
             self._miss()
             return None
@@ -146,9 +149,6 @@ class TargetSelector:
         acquiring = self._center is None or self._better >= self._upgrade_after
         if acquiring:
             det = max(wanted, key=lambda d: d.area)
-            if det.area < self._min_area_frac * width * height:
-                self._miss()
-                return None
         else:
             anchor = self._center
             det = min(
