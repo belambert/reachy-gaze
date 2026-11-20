@@ -84,6 +84,9 @@ random pose), `phase_for` (seconds in the current phase), and while tracking,
 
 ## Development
 
+See [arch.md](arch.md) for how the code is put together: threads, the
+look-around state machine, detector backends and the control panel.
+
     uv sync --extra dev
     uv run pytest
     node tests/test_panel.mjs
