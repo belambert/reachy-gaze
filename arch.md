@@ -369,8 +369,12 @@ flowchart TD
     A["detections"] --> B{"area >= min_area_frac<br/>of frame?"}
     B -- no --> X["drop"]
     B -- yes --> R["keep only the best-ranked class<br/>(TRACK_LABELS order)"]
-    R --> Q{"no lock yet, or a better class<br/>seen upgrade_after frames running?"}
-    Q -- yes --> Big["acquire the largest box"]
+    R --> L{"locked?"}
+    L -- no --> C{"largest box seen confirm_after times<br/>near one spot, gaps of at most max_gap?"}
+    C -- no --> W["count it, keep scanning"]
+    C -- yes --> OK
+    L -- yes --> Q{"a better class seen<br/>upgrade_after frames running?"}
+    Q -- yes --> Big["take the largest box"]
     Q -- no --> Near["follow the box nearest the last center"]
     Near --> J{"jump > max_jump?"}
     J -- yes --> M["miss"]
@@ -386,6 +390,12 @@ after being seen for several frames in a row. That keeps a detection
 flickering at the confidence threshold from bouncing the head between the
 two. The size gate (`MIN_AREA_FRAC`, 1% of the frame) runs first, so a tiny
 false positive of a preferred class can't hide a real one.
+
+A first lock needs the same class seen `CONFIRM_FRAMES` (3) times within
+`confirm_radius` of one spot, with no more than one empty frame in a row.
+Without it, a single-frame false positive would start tracking, and the head
+would hold its aim on nothing for `LOST_AFTER` (10 s). Once locked, the target
+is followed frame by frame, and a short loss doesn't need re-confirming.
 
 ## Coordinate Conventions
 
@@ -464,6 +474,7 @@ All of these are at the top of `reachy_gaze/main.py`. The ones marked
 | ---------------- | ------- | -------------------------------------------------------- |
 | `TRACK_LABELS`   | 4 cls   | Classes to look for, in preference order                 |
 | `MIN_AREA_FRAC`  | 0.01    | Smallest box, as a share of the frame, that is used      |
+| `CONFIRM_FRAMES` | 3       | Sightings near one spot needed before a first lock       |
 | `CONTROL_HZ`     | 50      | Control loop rate                                        |
 | `DETECT_HZ`      | 12      | Ceiling on detection requests                            |
 | `SMOOTH_TAU`     | 0.09 s  | Follower time constant                                   |
@@ -537,20 +548,16 @@ run separately on the GPU host with `uv sync --extra server` and
 
 Ordered roughly by how much each one affects behaviour on the robot.
 
-#### 1. One Frame Is Enough to Lock On
+#### 1. A Brief Sighting Holds the Aim as Long as a Long One
 
-When nothing is locked, `TargetSelector` takes the first detection that
-passes the size gate. Setting `State.goal` immediately turns `SCANNING` into
-`TRACKING`, and the aim is then held for `LOST_AFTER` (10 s). A single-frame
-false positive therefore costs ten seconds of staring at nothing. Size gating
-(`MIN_AREA_FRAC`) treats a symptom of this; a tiny box is just the most
-common way a one-frame ghost shows up.
+A first lock now needs `CONFIRM_FRAMES` sightings, so a one-frame ghost no
+longer starts tracking. But a false positive that lasts a few frames still
+gets the full `LOST_AFTER` (10 s) of held aim, the same as a cat that was
+watched for a minute.
 
-*Suggestion:* require a candidate to be seen in N of the last M frames
-(e.g. 3 of 4) near the same spot before acquiring, reusing the
-`upgrade_after` idea that already protects upgrades. Also consider a short
-`LOST_AFTER` for a target seen only briefly, and the full 10 s only once it
-has been tracked for a while.
+*Suggestion:* scale the hold with how long the target was tracked, e.g. 2 s
+for a target seen for under a second and the full 10 s only once it has been
+tracked for a while.
 
 #### 2. The Pose Used for Aiming Is Not the Capture Pose
 
@@ -686,7 +693,7 @@ on 3.14, which is what broke CI.
 
 | Step | Change                                       | Why first                                     |
 | ---- | -------------------------------------------- | --------------------------------------------- |
-| 1    | Multi-frame confirmation before acquiring    | Directly addresses the false-positive locks   |
+| 1    | Hold scaled to how long a target was seen    | Limits the cost of any false positive         |
 | 2    | Single size filter, per-class minimums       | Small, and pairs with step 1                  |
 | 3    | Timestamped pose buffer                      | Fixes aim error while moving                  |
 | 4    | World-frame association                      | Builds on step 3; fewer misses and swaps      |

@@ -74,6 +74,73 @@ class TestSelector:
         assert sel.has_target
 
 
+class TestConfirmation:
+    """A first lock waits for the same thing to be seen a few times."""
+
+    def selector(self, **kw):
+        return TargetSelector(confirm_after=3, **kw)
+
+    def test_a_one_frame_ghost_never_locks(self):
+        sel = self.selector()
+        assert sel.select([box(320, 240)], W, H) is None
+        for _ in range(5):
+            assert sel.select([], W, H) is None
+        assert not sel.has_target
+
+    def test_locks_on_the_third_sighting(self):
+        sel = self.selector()
+        assert sel.select([box(320, 240)], W, H) is None
+        assert sel.select([box(325, 242)], W, H) is None
+        assert sel.select([box(330, 244)], W, H) is not None
+        assert sel.has_target and sel.label == "cat"
+
+    def test_a_single_dropped_frame_is_tolerated(self):
+        sel = self.selector()
+        sel.select([box(320, 240)], W, H)
+        sel.select([], W, H)
+        sel.select([box(320, 240)], W, H)
+        assert sel.select([box(320, 240)], W, H) is not None
+
+    def test_two_dropped_frames_start_over(self):
+        sel = self.selector()
+        sel.select([box(320, 240)], W, H)
+        sel.select([box(320, 240)], W, H)
+        sel.select([], W, H)
+        sel.select([], W, H)
+        assert sel.select([box(320, 240)], W, H) is None, "only one sighting now"
+
+    def test_sightings_in_different_places_do_not_add_up(self):
+        sel = self.selector()
+        for x in (100, 500, 100, 500):
+            assert sel.select([box(x, 240)], W, H) is None
+
+    def test_a_different_class_in_the_same_place_starts_over(self):
+        sel = self.selector()
+        sel.select([box(320, 240, label="cat")], W, H)
+        sel.select([box(320, 240, label="dog")], W, H)
+        assert sel.select([box(320, 240, label="dog")], W, H) is None
+
+    def test_once_locked_it_follows_frame_by_frame(self):
+        sel = self.selector()
+        for _ in range(3):
+            sel.select([box(320, 240)], W, H)
+        assert sel.select([box(340, 240)], W, H) is not None
+
+    def test_a_brief_loss_keeps_the_lock_without_reconfirming(self):
+        sel = self.selector()
+        for _ in range(3):
+            sel.select([box(320, 240)], W, H)
+        sel.select([], W, H)
+        assert sel.select([box(320, 240)], W, H) is not None
+
+    def test_reset_forgets_a_half_confirmed_target(self):
+        sel = self.selector()
+        sel.select([box(320, 240)], W, H)
+        sel.select([box(320, 240)], W, H)
+        sel.reset()
+        assert sel.select([box(320, 240)], W, H) is None
+
+
 class TestCenterFilter:
     def test_first_sample_passes_through(self):
         assert CenterFilter().update((0.3, -0.2)) == (0.3, -0.2)
