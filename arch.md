@@ -503,12 +503,14 @@ panel test. `lint.yml` runs black and isort. Run them locally with:
 ```mermaid
 flowchart LR
     Dev["local main"] -- "git push origin main" --> GH["GitHub<br/>CI: lint + test"]
-    Dev -- "git push space main" --> HF["Hugging Face Space<br/>(index.html landing page)"]
+    GH -- "Deploy workflow,<br/>after Test passes" --> HF["Hugging Face Space<br/>(index.html landing page)"]
     HF -- "app install" --> Robot["Reachy Mini<br/>entry point reachy_mini_apps:<br/>reachy_gaze.main:ReachyGaze"]
 ```
 
-The robot installs the app from the Hugging Face Space, so a change only
-reaches it once it is pushed to the `space` remote. The detection server is
+The robot installs the app from the Hugging Face Space. `deploy.yml` runs
+after each successful Test run on a push to `main` and pushes that commit to
+the Space named by the `HF_SPACE` variable, authenticating with the
+`HF_TOKEN` secret. The detection server is
 run separately on the GPU host with `uv sync --extra server` and
 `uv run reachy-gaze-server`.
 
@@ -675,15 +677,13 @@ returned detections to the requested labels and confidence, and let each
 backend declare its capabilities (scored or not, open vocabulary or not) so
 the panel can show them.
 
-#### 13. Fragile Toolchain and Deployment
+#### 13. Fragile Toolchain
 
 `requires-python` is `>=3.10`, but the SDK's `pygobject` 3.46 does not import
-on 3.14, which is what broke CI. Deploying to the robot depends on someone
-remembering to push to a second remote.
+on 3.14, which is what broke CI.
 
 *Suggestion:* cap `requires-python` below 3.14 until the SDK moves to a newer
-`pygobject`, and add a workflow that pushes `main` to the Space after the
-tests pass.
+`pygobject`.
 
 ### Suggested Order of Work
 
@@ -695,4 +695,4 @@ tests pass.
 | 4    | World-frame association                      | Builds on step 3; fewer misses and swaps      |
 | 5    | Split `main.py`, immutable `Sighting`        | Makes steps 3 and 4 easier to test            |
 | 6    | Pipelined detection                          | Higher frame rate once the above is solid     |
-| 7    | Panel auth, persisted settings, deploy job   | Operational hygiene                           |
+| 7    | Panel auth, persisted settings               | Operational hygiene                           |

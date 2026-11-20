@@ -91,11 +91,21 @@ look-around state machine, detector backends and the control panel.
     node tests/test_panel.mjs
     uv run black reachy_gaze tests && uv run isort reachy_gaze tests
 
-There are two remotes: `origin` is the GitHub repo, which runs CI, and `space`
-is the Hugging Face Space the robot installs from. A change only reaches the
-robot once it's pushed to `space`.
+## Deployment
 
-    git push origin main && git push space main
+The robot installs the app from a Hugging Face Space. The Deploy workflow
+mirrors `main` to the Space each time the tests pass on a push to `main`, and
+can also be run by hand from the Actions tab. It needs two settings on the
+GitHub repo (Settings → Secrets and variables → Actions):
+
+| Name       | Kind     | Value                                                      |
+| ---------- | -------- | ---------------------------------------------------------- |
+| `HF_TOKEN` | Secret   | A Hugging Face access token with write access to the Space |
+| `HF_SPACE` | Variable | The Space as `owner/name`                                  |
+
+The workflow pushes without force, so if someone pushes to the Space
+directly, its history diverges and the deploy fails until the two are
+reconciled.
 
 ## License
 
