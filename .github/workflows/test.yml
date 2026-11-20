@@ -19,7 +19,8 @@ jobs:
       - run: >
           sudo apt-get install -y libcairo2-dev libgirepository1.0-dev
           gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
-      - run: uv sync --extra dev
+      # pinned: pygobject 3.46 imports pkgutil.get_loader, gone in Python 3.14
+      - run: uv sync --python 3.13 --extra dev
       - run: uv run pytest tests -q
       # The control panel's state sync has races that only show up under
       # out-of-order responses; these drive it against a stubbed DOM.
