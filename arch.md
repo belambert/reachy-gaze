@@ -514,3 +514,188 @@ The robot installs the app from the Hugging Face Space, so a change only
 reaches it once it is pushed to the `space` remote. The detection server is
 run separately on the GPU host with `uv sync --extra server` and
 `uv run reachy-gaze-server`.
+
+## Design Critique
+
+### What Works Well
+
+- **Two rates, one goal.** Splitting the slow, jumpy detection from a 50 Hz
+  critically damped follower makes the head move smoothly with a detector
+  that runs at a few frames per second. This is the core idea of the design
+  and it is sound.
+- **Pure, testable cores.** `Cycle`, `Stillness`, `TargetSelector`,
+  `CenterFilter` and `PoseSmoother` take their inputs explicitly (`Cycle`
+  even takes the time), have no SDK imports, and are covered directly by
+  tests.
+- **Pluggable detectors.** The `Detector` protocol plus the `BACKENDS`
+  registry keeps adding a backend to one class and one line, and the panel
+  discovers it without changes.
+- **World-frame reasoning where it matters.** The goal and boredom are both
+  computed in the world frame against the pose the frame was captured at, so
+  the head's own motion doesn't read as the target moving.
+
+### Weaknesses and Suggestions
+
+Ordered roughly by how much each one affects behaviour on the robot.
+
+#### 1. One Frame Is Enough to Lock On
+
+When nothing is locked, `TargetSelector` takes the first detection that
+passes the size gate. Setting `State.goal` immediately turns `SCANNING` into
+`TRACKING`, and the aim is then held for `LOST_AFTER` (10 s). A single-frame
+false positive therefore costs ten seconds of staring at nothing. Size gating
+(`MIN_AREA_FRAC`) treats a symptom of this; a tiny box is just the most
+common way a one-frame ghost shows up.
+
+*Suggestion:* require a candidate to be seen in N of the last M frames
+(e.g. 3 of 4) near the same spot before acquiring, reusing the
+`upgrade_after` idea that already protects upgrades. Also consider a short
+`LOST_AFTER` for a target seen only briefly, and the full 10 s only once it
+has been tracked for a while.
+
+#### 2. The Pose Used for Aiming Is Not the Capture Pose
+
+The vision thread reads `state.head_pose` at the top of its loop, then calls
+`get_frame()`, then waits for the detector. The comment says the goal is
+computed "against the pose the frame was captured at", but the pose is read
+before the frame and ignores camera latency. While the head is moving fast,
+as in a scan or a chase, this misplaces the goal by however far the head
+turned in that gap, and the follower then corrects it on the next frame,
+which shows up as small overshoots.
+
+*Suggestion:* have the control loop keep a short ring buffer of
+timestamped head poses, and interpolate it at the frame's capture time
+(minus a measured camera latency) when computing the goal.
+
+#### 3. Association Happens in Image Space
+
+`TargetSelector` follows the box nearest the last normalized image center
+and rejects jumps over `max_jump`. When the head turns, every object moves
+in the image, so a fast head motion can push the real target past
+`max_jump` (a miss) or bring a different object into the old spot (a swap).
+
+*Suggestion:* associate in the world frame. Convert each detection to a
+world direction with the capture pose, as is already done for the goal and
+for `Stillness`, and gate on angle. That makes the selector independent of
+what the head is doing, and `max_jump` becomes a physical angle.
+
+#### 4. Detection Is Strictly Serial
+
+Each vision iteration captures, encodes, sends, waits and only then captures
+again, so the frame rate is bounded by one network round trip plus
+inference. On wifi that round trip, not the GPU, sets the rate, and every
+result is at least one round trip old.
+
+*Suggestion:* keep one request in flight while capturing the next frame
+(a small pipeline with a depth of two), and drop results older than the
+newest one received. Pairs naturally with timestamped poses from point 2.
+
+#### 5. `main.py` Does Too Much
+
+`main.py` holds the tuning constants, `Config`, `State`, the control loop,
+the vision loop, the panel API, scan math and antenna animation in about 650
+lines. The control and vision loops themselves aren't unit testable without
+a fake robot, and they read `time.monotonic()` directly, unlike `Cycle`.
+
+*Suggestion:* split into `control.py` (the `_drive` loop and scan helpers),
+`vision.py` (the `_track` loop), `api.py` (endpoints) and `settings.py`
+(constants and `Config`), with `main.py` only wiring them. Pass a clock in
+so whole-loop tests can run without real time.
+
+#### 6. `State` Is a Shared Bag of Fields
+
+`State` mixes three kinds of data: user settings, what the vision thread
+saw, and status for the panel. Any of the three writers (control loop,
+vision thread, HTTP handlers) can touch any field. Related fields such as
+`goal`, `center`, `box`, `crop` and `label` are set and cleared together in
+three different places (`_track_forever`, `_enter_phase`, `set_config`),
+and a missed one leaves the panel inconsistent.
+
+*Suggestion:* replace the related fields with immutable objects published
+whole: a `Settings` dataclass replaced on each `/config`, and a `Sighting`
+(goal, box, crop, label, time) replaced by the vision thread or set to
+`None`. Clearing then becomes one assignment, and readers can take a
+reference without holding the lock.
+
+#### 7. A Dead Vision Thread Degrades Silently
+
+If the vision thread raises anything other than `DetectorUnavailable`, it
+records the error and exits, while the control loop carries on scanning
+forever. The panel shows the error, but the robot looks like it is working.
+
+*Suggestion:* either restart the thread with a backoff, or have the control
+loop notice it has died and stop the app, so the failure is obvious.
+
+#### 8. The Size Gate Is Applied Twice
+
+`MIN_AREA_FRAC` is enforced inside `TargetSelector.select` and again in
+`_track_forever` when filling `state.targets`. The two can drift apart.
+
+*Suggestion:* filter detections once, right after `detect()`, and give the
+selector already-filtered input. A per-class minimum (a bird is smaller than
+a person) would fit naturally there.
+
+#### 9. Settings Live in Code and Don't Persist
+
+Most tuning values are module constants, so changing one means a commit and
+a push to the Space. The few the panel can change are lost on restart.
+`STALE_AFTER` in `main.py` is unused, and `main.js` hard-codes its own,
+different value while claiming to mirror it.
+
+*Suggestion:* load defaults from a small settings file, save panel changes
+back to it, and send display constants such as `STALE_AFTER` in `/state`
+rather than duplicating them in JavaScript.
+
+#### 10. The Panel Can Redirect the Camera
+
+The panel listens on `0.0.0.0:8042` with no authentication, and `/config`
+accepts any `server_url`. Anyone on the network can point the robot's camera
+stream at a host of their choosing.
+
+*Suggestion:* bind to localhost by default or require a token for writes,
+and at minimum log every change to the backend or server URL.
+
+#### 11. The Built-in Server Blocks Its Event Loop
+
+`/detect` is declared `async` but calls `_model.predict` synchronously, so
+inference blocks the event loop. While a frame is being processed, no other
+request (including `/health` and other robots) is even accepted.
+
+*Suggestion:* declare the endpoint with plain `def`, so FastAPI runs it in a
+worker thread, or wrap the prediction in `run_in_threadpool`. If several
+robots share one server, batch their frames.
+
+#### 12. Backends Don't Behave the Same
+
+The three detectors interpret the same `detect(frame, labels, conf)` call
+differently. The built-in server returns every class when it knows none of
+the labels, and the VLM rarely scores its boxes, so `conf` is mostly
+ignored and every box gets 1.0. The app compensates with a vocabulary check
+at connect time.
+
+*Suggestion:* make the contract strict in the client layer: always filter
+returned detections to the requested labels and confidence, and let each
+backend declare its capabilities (scored or not, open vocabulary or not) so
+the panel can show them.
+
+#### 13. Fragile Toolchain and Deployment
+
+`requires-python` is `>=3.10`, but the SDK's `pygobject` 3.46 does not import
+on 3.14, which is what broke CI. Deploying to the robot depends on someone
+remembering to push to a second remote.
+
+*Suggestion:* cap `requires-python` below 3.14 until the SDK moves to a newer
+`pygobject`, and add a workflow that pushes `main` to the Space after the
+tests pass.
+
+### Suggested Order of Work
+
+| Step | Change                                       | Why first                                     |
+| ---- | -------------------------------------------- | --------------------------------------------- |
+| 1    | Multi-frame confirmation before acquiring    | Directly addresses the false-positive locks   |
+| 2    | Single size filter, per-class minimums       | Small, and pairs with step 1                  |
+| 3    | Timestamped pose buffer                      | Fixes aim error while moving                  |
+| 4    | World-frame association                      | Builds on step 3; fewer misses and swaps      |
+| 5    | Split `main.py`, immutable `Sighting`        | Makes steps 3 and 4 easier to test            |
+| 6    | Pipelined detection                          | Higher frame rate once the above is solid     |
+| 7    | Panel auth, persisted settings, deploy job   | Operational hygiene                           |
