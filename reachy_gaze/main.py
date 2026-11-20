@@ -67,10 +67,6 @@ STILL_DEGREES = 8.0  # a target within this of where it settled counts as still
 # while, so the scan moves on to something else instead of finding it again.
 IGNORE_DEGREES = 15.0
 IGNORE_SECONDS = 60.0
-# The head scrapes the body when it sits low, so it is held this far up (metres).
-HEAD_LIFT = 0.02
-
-REST_POSITION = np.array([0.0, 0.0, HEAD_LIFT])
 
 # Phases in which the head takes a lock on what it sees.
 LOOKING = (Phase.SCANNING, Phase.TRACKING)
@@ -344,7 +340,7 @@ class ReachyGaze(ReachyMiniApp):
             target = clamp_yaw(target, limit)  # also catches a lowered limit
 
             mini.set_target(
-                head=pose_matrix(smoother.step(target, dt), REST_POSITION),
+                head=pose_matrix(smoother.step(target, dt)),
                 antennas=self._antennas(perk, now - t0),
             )
 

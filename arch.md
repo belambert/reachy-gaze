@@ -339,7 +339,7 @@ What the control loop aims at in each phase:
 
 | Phase      | Head target                                                           |
 | ---------- | --------------------------------------------------------------------- |
-| `idle`     | Neutral orientation at `REST_POSITION`                                |
+| `idle`     | Neutral orientation                                                   |
 | `scanning` | A yaw sine sweep starting from the current yaw and direction          |
 | `tracking` | `State.goal`, the world-frame direction of the target                 |
 
@@ -396,7 +396,6 @@ false positive of a preferred class can't hide a real one.
 | `norm_center`             | Box center in `[-1, 1]` on both axes                                |
 | `State.box`               | Fractions of the frame, for the panel to draw                       |
 | `State.goal`, head pose   | World frame: +X forward, +Y left, +Z up; body yaw included          |
-| Head position             | Metres; raised by `HEAD_LIFT` so the head clears the body           |
 
 The goal is computed with `look_at_image_pose` against the head pose
 captured with the frame, not the current one. A detection that arrives late
@@ -475,7 +474,6 @@ All of these are at the top of `reachy_gaze/main.py`. The ones marked
 | `STILL_DEGREES`  | 8°      | Movement that resets the boredom clock                   |
 | `IGNORE_DEGREES` | 15°     | How close to a bored target a detection is ignored       |
 | `IGNORE_SECONDS` | 60 s    | How long a bored target is ignored                       |
-| `HEAD_LIFT`      | 0.02 m  | Holds the head up off the body                           |
 
 The detection confidence threshold (`conf`, 0.75) is also set in the panel.
 

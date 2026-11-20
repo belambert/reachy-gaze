@@ -436,3 +436,53 @@ class TestTargetCrop:
         from reachy_gaze.main import _fractions
 
         assert _fractions((0, 0, 639, 479), 640, 480) == (0.0, 0.0, 1.0, 1.0)
+
+
+@pytest.fixture(scope="module")
+def kin():
+    from reachy_mini.kinematics.analytical_kinematics import AnalyticalKinematics
+
+    return AnalyticalKinematics(automatic_body_yaw=True)
+
+
+def reachable(kin, head):
+    return bool(np.isfinite(kin.ik(head)).all())
+
+
+class TestReach:
+    """The daemon drops targets it can't reach, which stalls the head mid-turn."""
+
+    def test_the_whole_sweep_is_reachable(self, kin):
+        # Regression: lifted 2 cm, the head couldn't turn past ~51 degrees,
+        # so the scan stopped well short of its full width.
+        from reachy_gaze.main import SCAN_HZ
+        from reachy_gaze.tracking import pose_matrix
+
+        for t in np.linspace(0.0, 1.0 / SCAN_HZ, 200):
+            head = pose_matrix(ReachyGaze._scan_pose(t, limit=160.0))
+            assert reachable(kin, head), f"unreachable at t={t:.1f}s"
+
+    @pytest.mark.parametrize("yaw", [-160, -90, 0, 90, 160])
+    @pytest.mark.parametrize("pitch", [-25, 0, 25])
+    def test_tracking_can_turn_and_tilt(self, kin, yaw, pitch):
+        from reachy_gaze.tracking import pose_matrix
+
+        rot = Rotation.from_euler("ZY", [yaw, pitch], degrees=True)
+        assert reachable(kin, pose_matrix(rot))
+
+    def test_the_control_loop_only_commands_reachable_poses(
+        self, app, kin, monkeypatch
+    ):
+        import reachy_gaze.main as main
+
+        monkeypatch.setattr(main, "CONTROL_HZ", 1000.0)
+        state = State()
+        state.goal = Rotation.from_euler("ZY", [80, 15], degrees=True)
+        state.last_seen = time.monotonic() + 60.0  # stays aimed throughout
+        state.pull = 60.0  # get there within the run
+        commands = drive(app, FakeMini(stop_after=400), state)
+
+        assert state.phase.value == "tracking"
+        assert all(reachable(kin, head) for head, _ in commands)
+        yaw, _ = main.look_yaw_pitch(commands[-1][0])
+        assert yaw > 40.0, "the head got most of the way there"
