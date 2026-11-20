@@ -14,6 +14,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           cache-dependency-glob: pyproject.toml # uv.lock isn't committed
+          cache-suffix: lint # lint and test install different packages
       - run: uv venv --python 3.13
       - run: uv pip install black isort
       # --no-project: syncing would pull the robot SDK, which needs cairo.
