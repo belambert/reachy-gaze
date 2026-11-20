@@ -142,9 +142,9 @@ function apply(state) {
 }
 
 // Where the head is in the look-around cycle, with whatever is counting down.
-function phaseText({ phase, cycle, phase_for, bored_in }) {
-    if (!phase || phase === "idle") return "idle";
-    let text = `cycle ${cycle}: ${phase}`;
+function phaseText({ phase, phase_for, bored_in }) {
+    if (!phase) return "idle";
+    let text = phase;
     if (phase === "scanning") text += ` ${Math.round(phase_for)}s`;
     // ceil, so it reads 1s rather than 0s until it actually runs out
     if (phase === "tracking" && bored_in != null) text += `, bored in ${Math.ceil(bored_in)}s`;

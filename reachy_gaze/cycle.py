@@ -1,60 +1,26 @@
-"""The look-around cycle: random pose, hold, scan, track, and boredom.
+"""The look-around cycle: scan, track, and boredom.
 
-Each cycle starts by moving the head to a random pose and holding it, so a
-recording of the search that follows begins from somewhere new. The head then
-scans until it finds something, follows it for as long as it moves, and tires
-of it once it has stayed put for long enough, which starts the next cycle.
+The head scans until it finds something, follows it for as long as it moves,
+and tires of it once it has stayed put for long enough. A target it tired of is
+then ignored for a while, so the scan that follows looks for something else
+rather than coming straight back to it.
 """
 
 from __future__ import annotations
 
 import math
-import random
 from enum import Enum
-from typing import Callable
 
 import numpy as np
 import numpy.typing as npt
-from scipy.spatial.transform import Rotation
-
-Pose = tuple[Rotation, npt.NDArray[np.float64]]  # orientation, position in metres
 
 
 class Phase(str, Enum):
     """Where the head is in the cycle; published as-is in /state."""
 
     IDLE = "idle"  # tracking is off; the head rests at neutral
-    MOVING = "moving"  # heading for this cycle's random pose
-    HOLDING = "holding"  # still at the random pose, briefly
     SCANNING = "scanning"  # sweeping for something to look at
     TRACKING = "tracking"  # following a target, held through short losses
-
-
-def random_pose(
-    rng: random.Random,
-    yaw: float,
-    tilt: float,
-    shift: float,
-    reachable: Callable[[Pose], bool] = lambda _: True,
-    tries: int = 100,
-    lift: float = 0.0,
-) -> Pose:
-    """Uniform within +/-`yaw` and +/-`tilt` degrees, and +/-`shift` m per axis.
-
-    `lift` raises the whole position range in z, keeping the head off the body.
-
-    The head's reach isn't a box, so draws are repeated until `reachable`
-    accepts one. Running out of tries means the check itself is broken: even
-    the widest ranges in use pass about two draws in three.
-    """
-    for _ in range(tries):
-        y, p, r = (rng.uniform(-a, a) for a in (yaw, tilt, tilt))
-        position = np.array([rng.uniform(-shift, shift) for _ in range(3)])
-        position[2] += lift
-        pose = Rotation.from_euler("ZYX", [y, p, r], degrees=True), position
-        if reachable(pose):
-            return pose
-    raise RuntimeError(f"no reachable head pose in {tries} draws")
 
 
 class Cycle:
@@ -64,65 +30,28 @@ class Cycle:
     whole cycle in a test without waiting.
     """
 
-    def __init__(
-        self,
-        pose_fn: Callable[[], Pose],
-        hold: float,
-        move_timeout: float,
-        idle_reset: float,
-        rest: npt.ArrayLike = (0.0, 0.0, 0.0),
-    ) -> None:
-        """Hold each random pose `hold` s; scan `idle_reset` s before a new one.
-
-        `move_timeout` ends a move that never settles, e.g. a pose the
-        kinematics can't quite reach, so the cycle can't stall there. The idle
-        head rests at orientation neutral and position `rest`.
-        """
-        self.pose_fn = pose_fn
-        self.hold = hold
-        self.move_timeout = move_timeout
-        self.idle_reset = idle_reset
-        self.rest = np.asarray(rest, dtype=np.float64)
+    def __init__(self) -> None:
+        """Start idle."""
         self.phase = Phase.IDLE
         self.since = 0.0
-        self.count = 0  # cycles started; a new random pose each time
-        self.pose: Pose = (Rotation.identity(), self.rest)
 
-    def update(
-        self, now: float, *, enabled: bool, arrived: bool, aimed: bool, bored: bool
-    ) -> bool:
+    def update(self, now: float, *, enabled: bool, aimed: bool, bored: bool) -> bool:
         """Advance on this tick's facts; True if the phase changed."""
-        nxt = self._next(now, enabled, arrived, aimed, bored)
+        nxt = self._next(enabled, aimed, bored)
         if nxt is self.phase:
             return False
         self.phase, self.since = nxt, now
-        if nxt is Phase.MOVING:
-            self.count += 1
-            self.pose = self.pose_fn()
-        elif nxt is Phase.IDLE:
-            self.pose = (Rotation.identity(), self.rest)
         return True
 
-    def _next(
-        self, now: float, enabled: bool, arrived: bool, aimed: bool, bored: bool
-    ) -> Phase:
-        elapsed = now - self.since
+    def _next(self, enabled: bool, aimed: bool, bored: bool) -> Phase:
         match self.phase:
             case _ if not enabled:
                 return Phase.IDLE
             case Phase.IDLE:
-                return Phase.MOVING
-            case Phase.MOVING if arrived or elapsed >= self.move_timeout:
-                return Phase.HOLDING
-            case Phase.HOLDING if elapsed >= self.hold:
                 return Phase.SCANNING
             case Phase.SCANNING if aimed:
                 return Phase.TRACKING
-            case Phase.SCANNING if elapsed >= self.idle_reset:
-                return Phase.MOVING
-            case Phase.TRACKING if bored:
-                return Phase.MOVING
-            case Phase.TRACKING if not aimed:
+            case Phase.TRACKING if bored or not aimed:
                 return Phase.SCANNING
         return self.phase
 
@@ -153,6 +82,34 @@ class Stillness:
     def reset(self) -> None:
         """Forget the target."""
         self.anchor = self.since = None
+
+
+class Ignored:
+    """World directions to look past for a while: targets the head tired of.
+
+    A bored target usually hasn't gone anywhere, so without this the next scan
+    would find it again at once. Directions are in the world frame, so the
+    head's own turning doesn't move them.
+    """
+
+    def __init__(self, degrees: float, seconds: float) -> None:
+        """Ignore detections within `degrees` of a direction for `seconds`."""
+        self.limit = math.radians(degrees)
+        self.seconds = seconds
+        self._until: list[tuple[npt.NDArray[np.float64], float]] = []
+
+    def add(self, direction: npt.NDArray[np.float64], now: float) -> None:
+        """Start ignoring the unit world `direction` from `now`."""
+        self._until.append((direction, now + self.seconds))
+
+    def covers(self, direction: npt.NDArray[np.float64], now: float) -> bool:
+        """Whether `direction` is currently ignored."""
+        self._until = [(d, t) for d, t in self._until if t > now]
+        return any(angle_between(d, direction) <= self.limit for d, _ in self._until)
+
+    def clear(self) -> None:
+        """Ignore nothing."""
+        self._until = []
 
 
 def angle_between(a: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> float:
