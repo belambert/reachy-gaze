@@ -19,7 +19,7 @@
         </label>
 
         <label class="row">
-            <span>Response</span>
+            <span>Snappiness</span>
             <input type="range" id="pull" min="4" max="60" step="1">
             <output id="pull-value"></output>
         </label>
@@ -59,8 +59,11 @@
         </div>
 
         <p class="hint">
-            Looking for <span id="labels"></span>. Lower response is smoother, laggier. Boredom is how many seconds a
-            still target holds its attention before it looks somewhere new.
+            Looking for <span id="labels"></span>. Confidence is the lowest detector score that counts. Lower
+            snappiness is smoother but laggier. Boredom is how many seconds a still target holds its attention; it then
+            ignores that spot for a while and looks for something else. Travel is how far it turns either way.
+            Untick Tracking to stop and rest facing ahead; untick Sweep to have it wait where it is while searching,
+            rather than turning side to side.
         </p>
     </section>
 
@@ -68,16 +71,22 @@
         <div class="badges">
             <span class="badge" id="badge-phase">idle</span>
             <span class="badge" id="badge-detector">detector</span>
-            <span class="badge" id="badge-lock">lock</span>
-            <span class="badge" id="badge-fps">&ndash; fps</span>
+            <span class="badge" id="badge-fps">&ndash; det/s</span>
         </div>
         <div class="view" id="view">
             <div class="crosshair"></div>
             <div class="rings" id="rings"></div>
             <div class="targets" id="targets"></div>
+            <div class="targets" id="ignored"></div>
             <div class="marker" id="marker"><img id="crop" alt=""><span class="icon" id="icon"></span></div>
         </div>
         <p class="hint aim" id="aim"></p>
+        <p class="hint" id="ignoring"></p>
+        <p class="hint legend">
+            The view is the camera's frame. Rings mark 10&deg; steps off its center. The boxed image is the target,
+            yellow once it has gone unseen and the head is holding its aim. Other icons are things in view it isn't
+            following; faded ones are spots it got bored of and is ignoring.
+        </p>
         <p class="error" id="error"></p>
     </section>
 

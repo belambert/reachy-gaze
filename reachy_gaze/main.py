@@ -17,10 +17,14 @@ import threading
 import time
 
 import numpy as np
+import numpy.typing as npt
 from fastapi import Response
 from pydantic import BaseModel, Field, field_validator
 from reachy_mini import ReachyMini, ReachyMiniApp
-from reachy_mini.vision.look_at import look_at_image_pose
+from reachy_mini.vision.look_at import (
+    default_head_to_camera_transform,
+    look_at_image_pose,
+)
 from scipy.spatial.transform import Rotation
 
 from reachy_gaze.cycle import Cycle, Ignored, Phase, Stillness
@@ -57,7 +61,7 @@ BLEND_TAU = 0.4  # seconds to ease between searching and locked-on posture
 SCAN_DEGREES = 90.0  # half-width of the yaw scan
 SCAN_HZ = 0.04  # yaw scan rate; peak speed is 2*pi*SCAN_HZ*SCAN_DEGREES
 LOST_AFTER = 10.0  # seconds holding the last aim point before giving up
-STALE_AFTER = 5.0  # seconds before the panel calls the lock stale rather than live
+STALE_AFTER = 1.0  # seconds unseen before the panel calls the target lost
 RETRY_AFTER = 2.0  # seconds to wait out an unreachable detection server
 
 # The look-around cycle.
@@ -94,6 +98,30 @@ def look_yaw_pitch(head_pose: np.ndarray) -> tuple[float, float]:
     return math.degrees(math.atan2(y, x)), math.degrees(
         math.asin(max(-1.0, min(1.0, z)))
     )
+
+
+def image_center(
+    direction: npt.NDArray[np.float64],
+    head_pose: npt.NDArray[np.float64],
+    T_head_cam: npt.NDArray[np.float64] | None,
+    K: npt.NDArray[np.float64],
+    width: int,
+    height: int,
+) -> tuple[float, float] | None:
+    """Where a unit world `direction` falls in the frame, as `norm_center` has it.
+
+    None when it is behind the camera or outside the frame. Lens distortion is
+    ignored, as the panel's rings do.
+    """
+    if T_head_cam is None:
+        T_head_cam = default_head_to_camera_transform()
+    x, y, z = (head_pose @ T_head_cam)[:3, :3].T @ direction
+    if z <= 0:
+        return None
+    u, v = K[0, 0] * x / z + K[0, 2], K[1, 1] * y / z + K[1, 2]
+    if not (0 <= u <= width - 1 and 0 <= v <= height - 1):
+        return None
+    return (u / max(width - 1, 1) * 2 - 1, v / max(height - 1, 1) * 2 - 1)
 
 
 def _fractions(
@@ -184,6 +212,8 @@ class State:
         # where the targets it tired of sat.
         self.stillness = Stillness(STILL_DEGREES)
         self.ignored = Ignored(IGNORE_DEGREES, IGNORE_SECONDS)
+        # The panel's view of those: {"label", "center" or None, "seconds"}.
+        self.ignored_view: list[dict] = []
 
     def snapshot(self) -> dict:
         """Everything the control panel polls, in one consistent read."""
@@ -217,6 +247,8 @@ class State:
                 "targets": self.targets,
                 "aim": {"yaw": round(yaw, 1), "pitch": round(pitch, 1)},
                 "lens": self.lens,
+                "ignored": self.ignored_view,
+                "stale_after": STALE_AFTER,
                 "seen_ago": round(seen_ago, 1) if locked else None,
                 "phase": self.phase.value,
                 "phase_for": round(now - self.phase_since, 1),
@@ -358,9 +390,10 @@ class ReachyGaze(ReachyMiniApp):
         """Publish a new phase, dropping what no longer applies; caller locks."""
         state.phase, state.phase_since = cycle.phase, now
         if bored and state.stillness.anchor is not None:
-            state.ignored.add(state.stillness.anchor, now)
+            state.ignored.add(state.stillness.anchor, now, state.label)
         if cycle.phase is Phase.IDLE:
             state.ignored.clear()
+            state.ignored_view = []
         # A lost target keeps its held aim until the scan takes over; a boring
         # one is dropped at once, or the held aim would re-lock it.
         if cycle.phase is Phase.IDLE or bored:
@@ -482,6 +515,17 @@ class ReachyGaze(ReachyMiniApp):
                     {"label": d.label, "center": list(norm_center(d, width, height))}
                     for d in dets
                     if d is not det and d.area >= MIN_AREA_FRAC * width * height
+                ]
+                # Where the spots the head tired of are now, as the head turns.
+                state.ignored_view = [
+                    {
+                        "label": label,
+                        "center": image_center(
+                            d, head_pose, T_head_cam, K, width, height
+                        ),
+                        "seconds": round(left),
+                    }
+                    for d, label, left in state.ignored.active(time.monotonic())
                 ]
                 # Re-checked here: the phase may have moved on during detection,
                 # and the head may have tired of this target in the meantime.

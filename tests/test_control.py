@@ -264,6 +264,14 @@ class TestEnteringAPhase:
         state.stillness.update(np.array([1.0, 0.0, 0.0]), 0.0)
         return state
 
+    def test_the_ignored_spot_keeps_its_label(self):
+        from reachy_gaze.cycle import Phase
+
+        state = self.tracking_state()
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.SCANNING), 7.0, True)
+        [(_, label, left)] = state.ignored.active(8.0)
+        assert label == "cat" and left > 0
+
     def test_boredom_drops_the_target_and_ignores_where_it_was(self):
         from reachy_gaze.cycle import Phase
 
@@ -414,6 +422,9 @@ class TestLockingByPhase:
         state = self.run_vision(monkeypatch, Phase.SCANNING, ignore=ahead)
         assert state.goal is None and state.label == ""
         assert not state.targets, "an ignored target is not shown as in view"
+        [spot] = state.ignored_view
+        assert spot["seconds"] > 0 and spot["center"] is not None
+        assert abs(spot["center"][0]) < 0.2, "drawn about where it was ignored"
 
 
 class TestTargetCrop:
@@ -486,3 +497,47 @@ class TestReach:
         assert all(reachable(kin, head) for head, _ in commands)
         yaw, _ = main.look_yaw_pitch(commands[-1][0])
         assert yaw > 40.0, "the head got most of the way there"
+
+
+class TestImageCenter:
+    K = np.array([[500.0, 0, 320], [0, 500.0, 240], [0, 0, 1]])
+
+    def aimed_at(self, u, v, head_pose):
+        from reachy_mini.vision.look_at import look_at_image_pose
+
+        pose = look_at_image_pose(u, v, self.K, np.zeros(5), head_pose)
+        return pose[:3, 0]
+
+    @pytest.mark.parametrize("u, v", [(320, 240), (100, 400), (600, 50)])
+    def test_inverts_the_aim_at_a_pixel(self, u, v):
+        from reachy_gaze.main import image_center
+
+        head = np.eye(4)
+        x, y = image_center(self.aimed_at(u, v, head), head, None, self.K, 640, 480)
+        assert x == pytest.approx(u / 639 * 2 - 1, abs=0.05)
+        assert y == pytest.approx(v / 479 * 2 - 1, abs=0.05)
+
+    def test_follows_the_head_as_it_turns(self):
+        from reachy_gaze.main import image_center
+        from reachy_gaze.tracking import pose_matrix
+
+        ahead = self.aimed_at(320, 240, np.eye(4))
+        turned = pose_matrix(Rotation.from_euler("Z", 20, degrees=True))
+        x, _ = image_center(ahead, turned, None, self.K, 640, 480)
+        assert x > 0.2, "turning left moves what was ahead to the right"
+
+    def test_out_of_view_is_none(self):
+        from reachy_gaze.main import image_center
+
+        behind = np.array([-1.0, 0.0, 0.0])
+        side = np.array([0.0, 1.0, 0.0])
+        for d in (behind, side):
+            assert image_center(d, np.eye(4), None, self.K, 640, 480) is None
+
+
+def test_the_panel_is_told_when_a_target_counts_as_lost():
+    from reachy_gaze.main import STALE_AFTER
+
+    snap = State().snapshot()
+    assert snap["stale_after"] == STALE_AFTER
+    assert snap["ignored"] == []

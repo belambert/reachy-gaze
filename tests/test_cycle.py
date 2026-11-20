@@ -122,6 +122,16 @@ class TestIgnored:
         ig.add(toward(40), 10.0)
         assert ig.covers(toward(-40), 20.0) and ig.covers(toward(40), 20.0)
 
+    def test_active_lists_what_is_ignored_and_for_how_long(self):
+        ig = Ignored(15.0, 60.0)
+        ig.add(toward(30), 0.0, "cat")
+        ig.add(toward(-30), 50.0, "dog")
+        assert [(label, left) for _, label, left in ig.active(20.0)] == [
+            ("cat", 40.0),
+            ("dog", 90.0),
+        ]
+        assert [label for _, label, _ in ig.active(70.0)] == ["dog"]
+
     def test_clear_forgets_everything(self):
         ig = Ignored(15.0, 60.0)
         ig.add(toward(0), 0.0)
