@@ -20,7 +20,6 @@ import numpy as np
 from fastapi import Response
 from pydantic import BaseModel, Field, field_validator
 from reachy_mini import ReachyMini, ReachyMiniApp
-from reachy_mini.kinematics.analytical_kinematics import AnalyticalKinematics
 from reachy_mini.vision.look_at import look_at_image_pose
 from scipy.spatial.transform import Rotation
 
@@ -68,11 +67,6 @@ STILL_DEGREES = 8.0  # a target within this of where it settled counts as still
 # while, so the scan moves on to something else instead of finding it again.
 IGNORE_DEGREES = 15.0
 IGNORE_SECONDS = 60.0
-# The head scrapes the body when it sits low, so it is held this far up (metres).
-# That is the edge of its reach, though: lifted, it can barely turn or tilt, so
-# it sinks as far as each pose needs (see max_lift) and rises again after.
-HEAD_LIFT = 0.02
-LIFT_TAU = 0.3  # seconds to rise back toward HEAD_LIFT
 
 # Phases in which the head takes a lock on what it sees.
 LOOKING = (Phase.SCANNING, Phase.TRACKING)
@@ -100,27 +94,6 @@ def look_yaw_pitch(head_pose: np.ndarray) -> tuple[float, float]:
     return math.degrees(math.atan2(y, x)), math.degrees(
         math.asin(max(-1.0, min(1.0, z)))
     )
-
-
-def max_lift(kin: AnalyticalKinematics, rot: Rotation, cap: float) -> float:
-    """Highest head height up to `cap` (metres) at which `rot` can be reached.
-
-    The daemon drops any target its kinematics can't reach and leaves the head
-    where it was, so an unreachable lift would stop the head mid-turn. Lower is
-    never less reachable, so the answer is found by bisection; 0 if even the
-    lowest height fails, in which case nothing would help.
-    """
-
-    def ok(z: float) -> bool:
-        return bool(np.isfinite(kin.ik(pose_matrix(rot, [0.0, 0.0, z]))).all())
-
-    if ok(cap):
-        return cap
-    lo, hi = 0.0, cap
-    while hi - lo > 2e-4:
-        mid = (lo + hi) / 2
-        lo, hi = (mid, hi) if ok(mid) else (lo, mid)
-    return lo
 
 
 def _fractions(
@@ -299,8 +272,6 @@ class ReachyGaze(ReachyMiniApp):
         period = 1.0 / CONTROL_HZ
         smoother = PoseSmoother(SMOOTH_TAU, MAX_HEAD_SPEED, MAX_HEAD_PULL)
         cycle = Cycle()
-        kin = AnalyticalKinematics(automatic_body_yaw=True)  # as the daemon has it
-        lift = HEAD_LIFT
         perk = 0.0
         was_scanning = False
         scan_t0 = 0.0
@@ -368,16 +339,8 @@ class ReachyGaze(ReachyMiniApp):
                 target = Rotation.identity()
             target = clamp_yaw(target, limit)  # also catches a lowered limit
 
-            # Sink at once when a pose needs it, so the target is never dropped,
-            # but rise back gently.
-            rot = smoother.step(target, dt)
-            room = max_lift(kin, rot, HEAD_LIFT)
-            if room < lift:
-                lift = room
-            else:
-                lift += (room - lift) * (1.0 - math.exp(-dt / LIFT_TAU))
             mini.set_target(
-                head=pose_matrix(rot, [0.0, 0.0, lift]),
+                head=pose_matrix(smoother.step(target, dt)),
                 antennas=self._antennas(perk, now - t0),
             )
 

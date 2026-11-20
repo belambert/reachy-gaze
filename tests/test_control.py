@@ -449,26 +449,26 @@ def reachable(kin, head):
     return bool(np.isfinite(kin.ik(head)).all())
 
 
-class TestLift:
-    """The head sinks below HEAD_LIFT only as far as a pose needs."""
+class TestReach:
+    """The daemon drops targets it can't reach, which stalls the head mid-turn."""
 
-    def test_level_and_ahead_keeps_the_full_lift(self, kin):
-        from reachy_gaze.main import HEAD_LIFT, max_lift
+    def test_the_whole_sweep_is_reachable(self, kin):
+        # Regression: lifted 2 cm, the head couldn't turn past ~51 degrees,
+        # so the scan stopped well short of its full width.
+        from reachy_gaze.main import SCAN_HZ
+        from reachy_gaze.tracking import pose_matrix
 
-        assert max_lift(kin, Rotation.identity(), HEAD_LIFT) == HEAD_LIFT
+        for t in np.linspace(0.0, 1.0 / SCAN_HZ, 200):
+            head = pose_matrix(ReachyGaze._scan_pose(t, limit=160.0))
+            assert reachable(kin, head), f"unreachable at t={t:.1f}s"
 
-    @pytest.mark.parametrize("yaw", [-160, -90, -60, 60, 90, 160])
-    @pytest.mark.parametrize("pitch", [-25, -10, 0, 10, 25])
-    def test_the_lift_chosen_is_reachable(self, kin, yaw, pitch):
-        # Regression: lifted to HEAD_LIFT, the head could not turn past ~50
-        # degrees or tilt at all, so the daemon dropped the scan's targets.
-        from reachy_gaze.main import HEAD_LIFT, max_lift
+    @pytest.mark.parametrize("yaw", [-160, -90, 0, 90, 160])
+    @pytest.mark.parametrize("pitch", [-25, 0, 25])
+    def test_tracking_can_turn_and_tilt(self, kin, yaw, pitch):
         from reachy_gaze.tracking import pose_matrix
 
         rot = Rotation.from_euler("ZY", [yaw, pitch], degrees=True)
-        z = max_lift(kin, rot, HEAD_LIFT)
-        assert 0.0 <= z < HEAD_LIFT
-        assert reachable(kin, pose_matrix(rot, [0.0, 0.0, z]))
+        assert reachable(kin, pose_matrix(rot))
 
     def test_the_control_loop_only_commands_reachable_poses(
         self, app, kin, monkeypatch

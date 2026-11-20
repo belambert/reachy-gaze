@@ -344,15 +344,6 @@ What the control loop aims at in each phase:
 | `tracking` | `State.goal`, the world-frame direction of the target                 |
 
 Every target is passed through `clamp_yaw` with the panel's Travel limit.
-
-The head is held `HEAD_LIFT` (2 cm) up so it doesn't scrape the body, but
-that height is the edge of its reach: lifted fully, it can't turn more than
-about 50° from the body or tilt at all. The daemon drops any target its
-kinematics can't reach, which would stop the head mid-turn. So each tick
-`max_lift` runs the daemon's own `AnalyticalKinematics` and finds, by
-bisection, the highest height up to `HEAD_LIFT` at which the commanded
-orientation is reachable. The head sinks to it at once and rises back over
-`LIFT_TAU`.
 The antennas wag while searching and perk up while tracking, eased with
 `BLEND_TAU`.
 
@@ -405,7 +396,6 @@ false positive of a preferred class can't hide a real one.
 | `norm_center`             | Box center in `[-1, 1]` on both axes                                |
 | `State.box`               | Fractions of the frame, for the panel to draw                       |
 | `State.goal`, head pose   | World frame: +X forward, +Y left, +Z up; body yaw included          |
-| Head position             | Metres; up to `HEAD_LIFT`, lowered as far as each pose needs        |
 
 The goal is computed with `look_at_image_pose` against the head pose
 captured with the frame, not the current one. A detection that arrives late
@@ -484,8 +474,6 @@ All of these are at the top of `reachy_gaze/main.py`. The ones marked
 | `STILL_DEGREES`  | 8°      | Movement that resets the boredom clock                   |
 | `IGNORE_DEGREES` | 15°     | How close to a bored target a detection is ignored       |
 | `IGNORE_SECONDS` | 60 s    | How long a bored target is ignored                       |
-| `HEAD_LIFT`      | 0.02 m  | Holds the head up off the body when the pose allows      |
-| `LIFT_TAU`       | 0.3 s   | How quickly the head rises back to `HEAD_LIFT`           |
 
 The detection confidence threshold (`conf`, 0.75) is also set in the panel.
 
