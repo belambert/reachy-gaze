@@ -11,7 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          cache-dependency-glob: pyproject.toml # uv.lock isn't committed
       # The control loop's tests import the app, so the robot SDK has to import
       # too: PyGObject builds against cairo and girepository, and the SDK asks
       # gi for the GStreamer typelibs at import time.
