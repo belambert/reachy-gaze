@@ -104,6 +104,7 @@ classDiagram
         phase, phase_since
         stillness: Stillness
         ignored: Ignored
+        ignored_view
         detector_ok, error, fps
         snapshot() dict
     }
@@ -407,7 +408,7 @@ The app mounts three endpoints on the SDK's `settings_app` at `:8042`:
 
 | Endpoint       | Purpose                                                                |
 | -------------- | ---------------------------------------------------------------------- |
-| `GET /state`   | `State.snapshot()`: settings, lock, phase, aim, boxes, lens, fps       |
+| `GET /state`   | `State.snapshot()`: settings, phase, aim, boxes, ignored spots, lens   |
 | `GET /crop`    | JPEG of the current target box, or 404                                 |
 | `POST /config` | Partial `Config` update; returns a fresh snapshot                      |
 
@@ -433,7 +434,8 @@ Responses can arrive out of order, so `main.js` numbers every request and
 never lets an older response overwrite a newer one. Fields the user has
 edited but the app hasn't confirmed yet are tracked in `dirty`, so a poll
 can't overwrite them. `tests/test_panel.mjs` reproduces these interleavings
-against a stubbed DOM.
+against a stubbed DOM. Display thresholds such as `STALE_AFTER` come from
+`/state` too, so the panel and the app can't disagree.
 
 ## Built-in Detection Server
 
@@ -466,7 +468,7 @@ All of these are at the top of `reachy_gaze/main.py`. The ones marked
 | `DETECT_HZ`      | 12      | Ceiling on detection requests                            |
 | `SMOOTH_TAU`     | 0.09 s  | Follower time constant                                   |
 | `MAX_HEAD_SPEED` | 3.5     | rad/s cap on head rotation                               |
-| `MAX_HEAD_PULL`  | 5.0     | rad/s² cap on the follower's pull (*panel*: Response)    |
+| `MAX_HEAD_PULL`  | 5.0     | rad/s² cap on the follower's pull (*panel*: Snappiness)  |
 | `SCAN_DEGREES`   | 90°     | Scan half-width (*panel*: Travel)                        |
 | `SCAN_HZ`        | 0.04    | Scan rate                                                |
 | `LOST_AFTER`     | 10 s    | How long the aim is held after the last sighting         |
@@ -636,12 +638,9 @@ a person) would fit naturally there.
 
 Most tuning values are module constants, so changing one means a commit and
 a push to the Space. The few the panel can change are lost on restart.
-`STALE_AFTER` in `main.py` is unused, and `main.js` hard-codes its own,
-different value while claiming to mirror it.
 
-*Suggestion:* load defaults from a small settings file, save panel changes
-back to it, and send display constants such as `STALE_AFTER` in `/state`
-rather than duplicating them in JavaScript.
+*Suggestion:* load defaults from a small settings file and save panel
+changes back to it.
 
 #### 10. The Panel Can Redirect the Camera
 

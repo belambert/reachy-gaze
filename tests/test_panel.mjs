@@ -44,9 +44,9 @@ function harness(source, { stateStatus = 200 } = {}) {
     const ids = [
         "labels", "conf", "conf-value", "pull", "pull-value", "bored_after",
         "bored_after-value", "yaw_limit", "yaw_limit-value", "badge-phase", "enabled", "scan",
-        "server-url", "apply-url", "backend", "badge-detector", "badge-lock",
+        "server-url", "apply-url", "backend", "badge-detector",
         "badge-fps", "marker", "crop", "icon", "error", "aim", "targets",
-        "view", "rings",
+        "view", "rings", "ignored", "ignoring",
     ];
     const els = Object.fromEntries(ids.map((i) => [i, makeEl(i)]));
     const app = {
@@ -54,7 +54,7 @@ function harness(source, { stateStatus = 200 } = {}) {
         conf: 0.4, pull: 20, server_url: "http://old:8100", scan: true,
         locked: false, detector_ok: true, error: "", fps: 0, center: null,
         box: null, crop_id: 0, yaw_limit: 90,
-        seen_ago: null, backend: "triton",
+        seen_ago: null, backend: "triton", stale_after: 1.0, ignored: [],
         phase: "idle", phase_for: 0, bored_after: 20, bored_in: null,
         backends: [
             { key: "triton", label: "Triton (vision-server)", default_url: "localhost:8101" },
@@ -152,30 +152,64 @@ const tests = {
         assert.ok(h.els["badge-detector"].classList.contains("bad"));
     },
 
-    async "the lock badge distinguishes a live target from a held aim"() {
+    async "the phase badge tells a target in sight from a held aim"() {
         const h = harness(SOURCE);
-        await sleep(60);
-        const lock = h.els["badge-lock"];
-
-        assert.equal(lock.textContent, "searching");
-        assert.ok(lock.classList.contains("bad"));
-
-        Object.assign(h.app, { locked: true, seen_ago: 0.2, label: "cat" });
+        const node = h.els["badge-phase"];
+        Object.assign(h.app, {
+            phase: "tracking", locked: true, seen_ago: 0.2, label: "cat", bored_in: 12.5,
+        });
         await sleep(400);
-        assert.equal(lock.textContent, "locked: cat");
-        assert.ok(lock.classList.contains("ok"));
+        assert.equal(node.textContent, "tracking cat, bored in 13s");
+        assert.ok(node.classList.contains("ok"));
 
-        // The head still aims there, but the cat was last seen 6s ago: saying
-        // "locked" here is what would mislead.
-        Object.assign(h.app, { locked: true, seen_ago: 6.0 });
+        // The head still aims there, but the cat was last seen 6s ago: a
+        // countdown here would read as if it were still in sight.
+        Object.assign(h.app, { seen_ago: 6.0 });
         await sleep(400);
-        assert.equal(lock.textContent, "holding: cat (6s)");
-        assert.ok(lock.classList.contains("warn"));
-        assert.ok(!lock.classList.contains("ok"), "tones must be exclusive");
+        assert.equal(node.textContent, "tracking cat, lost 6s ago");
+        assert.ok(node.classList.contains("warn"));
+        assert.ok(!node.classList.contains("ok"), "tones must be exclusive");
+    },
 
-        Object.assign(h.app, { locked: false, seen_ago: null });
+    async "the app decides when a target counts as lost"() {
+        const h = harness(SOURCE);
+        Object.assign(h.app, {
+            phase: "tracking", locked: true, seen_ago: 3.0, label: "dog", stale_after: 5.0,
+        });
         await sleep(400);
-        assert.equal(lock.textContent, "searching");
+        assert.equal(h.els["badge-phase"].textContent, "tracking dog");
+    },
+
+    async "ignored spots are drawn faded and listed"() {
+        const h = harness(SOURCE);
+        Object.assign(h.app, {
+            ignored: [
+                { label: "cat", center: [0.5, 0], seconds: 45 },
+                { label: "person", center: null, seconds: 12 }, // out of view
+            ],
+        });
+        await sleep(400);
+        const nodes = h.els.ignored.options;
+        assert.equal(nodes.length, 1, "only the one in view is drawn");
+        assert.equal(nodes[0].className, "target ignored");
+        assert.equal(nodes[0].textContent, "🐱");
+        assert.equal(nodes[0].style.left, "75%");
+        assert.equal(
+            h.els.ignoring.textContent,
+            "Ignoring a cat for 45s. Ignoring a person for 12s.",
+        );
+
+        h.app.ignored = [];
+        await sleep(400);
+        assert.equal(h.els.ignored.options.length, 0);
+        assert.equal(h.els.ignoring.textContent, "");
+    },
+
+    async "the rate badge counts detections"() {
+        const h = harness(SOURCE);
+        h.app.fps = 9.4;
+        await sleep(400);
+        assert.equal(h.els["badge-fps"].textContent, "9.4 det/s");
     },
 
     async "the marker turns yellow once the target stops being detected"() {

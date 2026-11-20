@@ -4,9 +4,8 @@ const el = (id) => document.getElementById(id);
 const EMOJI = { cat: "🐱", dog: "🐶", bird: "🐦", person: "🧍" };
 const emoji = (label) => EMOJI[label] ?? "🎯";
 
-// Mirrors STALE_AFTER in the app. Only affects how the lock badge and marker
-// read, so a drift between the two costs nothing but wording.
-const STALE_AFTER = 1.0;
+// Until the first poll says otherwise; the app sends its own as stale_after.
+let staleAfter = 1.0;
 
 // Rings of equal angle off the camera axis, this many degrees apart.
 const RING_STEP = 10;
@@ -98,18 +97,9 @@ function apply(state) {
         state.detector_ok ? "detector up" : "detector down",
     );
 
-    // The head holds its aim long after the last sighting, so saying "locked"
-    // for all of it would misreport a target that left seconds ago.
-    if (!state.locked) {
-        badge("badge-lock", "bad", "searching");
-    } else if (state.seen_ago < STALE_AFTER) {
-        badge("badge-lock", "ok", `locked: ${state.label}`);
-    } else {
-        badge("badge-lock", "warn", `holding: ${state.label} (${Math.round(state.seen_ago)}s)`);
-    }
-
-    el("badge-fps").textContent = state.detector_ok ? `${state.fps} fps` : "– fps";
-    badge("badge-phase", state.phase === "tracking" ? "ok" : "", phaseText(state));
+    staleAfter = state.stale_after ?? staleAfter;
+    el("badge-fps").textContent = state.detector_ok ? `${state.fps} det/s` : "– det/s";
+    badge("badge-phase", ...phaseBadge(state));
 
     const marker = el("marker");
     if (state.box && state.locked) {
@@ -124,7 +114,7 @@ function apply(state) {
         el("icon").textContent = emoji(state.label);
         marker.title = state.label;
         // yellow while the head holds its aim on a target it has stopped seeing
-        marker.classList.toggle("stale", state.seen_ago >= STALE_AFTER);
+        marker.classList.toggle("stale", state.seen_ago >= staleAfter);
         // the icon sits beside the box, on whichever side has room
         marker.classList.toggle("flip", x2 > 70);
         if (state.crop_id !== cropId) {
@@ -135,21 +125,36 @@ function apply(state) {
         marker.style.display = "none";
     }
     renderTargets(state.targets ?? []);
+    renderIgnored(state.ignored ?? []);
+    el("ignoring").textContent = ignoringText(state.ignored ?? []);
     renderRings(state.lens);
     el("aim").textContent = aimText(state.aim);
 
     el("error").textContent = state.error || "";
 }
 
-// Where the head is in the look-around cycle, with whatever is counting down.
-function phaseText({ phase, phase_for, bored_in }) {
-    if (!phase) return "idle";
-    let text = phase;
-    if (phase === "scanning") text += ` ${Math.round(phase_for)}s`;
+// [tone, text] for where the head is in the look-around cycle. The head holds
+// its aim for a while after the last sighting, so a tracked target that has
+// gone unseen is called lost rather than reported as if still in sight.
+function phaseBadge({ phase, phase_for, label, seen_ago, bored_in }) {
+    if (phase === "scanning") return ["", `scanning ${Math.round(phase_for)}s`];
+    if (phase !== "tracking") return ["", "idle"];
+    const what = label ? `tracking ${label}` : "tracking";
+    if (seen_ago != null && seen_ago >= staleAfter) {
+        return ["warn", `${what}, lost ${Math.round(seen_ago)}s ago`];
+    }
     // ceil, so it reads 1s rather than 0s until it actually runs out
-    if (phase === "tracking" && bored_in != null) text += `, bored in ${Math.ceil(bored_in)}s`;
-    return text;
+    return ["ok", bored_in != null ? `${what}, bored in ${Math.ceil(bored_in)}s` : what];
 }
+
+// "Ignoring a cat for 45s", for the spots the head got bored of.
+function ignoringText(ignored) {
+    return ignored
+        .map(({ label, seconds }) => `Ignoring ${article(label)} ${label || "spot"} for ${seconds}s.`)
+        .join(" ");
+}
+
+const article = (label) => (/^[aeiou]/.test(label ?? "") ? "an" : "a");
 
 // Head aim in words: +yaw is left, +pitch is up (see look_yaw_pitch in main.py).
 function aimText(aim) {
@@ -184,6 +189,22 @@ function renderTargets(targets) {
             place(node, center);
             return node;
         }),
+    );
+}
+
+// Faded markers where ignored targets sat, if that spot is in view.
+function renderIgnored(ignored) {
+    el("ignored").replaceChildren(
+        ...ignored
+            .filter(({ center }) => center)
+            .map(({ label, center }) => {
+                const node = document.createElement("div");
+                node.className = "target ignored";
+                node.textContent = emoji(label);
+                node.title = `${label}, ignored for now`;
+                place(node, center);
+                return node;
+            }),
     );
 }
 

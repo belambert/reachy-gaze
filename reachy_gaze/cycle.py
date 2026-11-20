@@ -96,16 +96,24 @@ class Ignored:
         """Ignore detections within `degrees` of a direction for `seconds`."""
         self.limit = math.radians(degrees)
         self.seconds = seconds
-        self._until: list[tuple[npt.NDArray[np.float64], float]] = []
+        self._until: list[tuple[npt.NDArray[np.float64], float, str]] = []
 
-    def add(self, direction: npt.NDArray[np.float64], now: float) -> None:
-        """Start ignoring the unit world `direction` from `now`."""
-        self._until.append((direction, now + self.seconds))
+    def add(
+        self, direction: npt.NDArray[np.float64], now: float, label: str = ""
+    ) -> None:
+        """Start ignoring the unit world `direction`, where a `label` sat, from `now`."""
+        self._until.append((direction, now + self.seconds, label))
 
     def covers(self, direction: npt.NDArray[np.float64], now: float) -> bool:
         """Whether `direction` is currently ignored."""
-        self._until = [(d, t) for d, t in self._until if t > now]
-        return any(angle_between(d, direction) <= self.limit for d, _ in self._until)
+        return any(
+            angle_between(d, direction) <= self.limit for d, _, _ in self.active(now)
+        )
+
+    def active(self, now: float) -> list[tuple[npt.NDArray[np.float64], str, float]]:
+        """Each ignored (direction, label, seconds left), dropping expired ones."""
+        self._until = [entry for entry in self._until if entry[1] > now]
+        return [(d, label, t - now) for d, t, label in self._until]
 
     def clear(self) -> None:
         """Ignore nothing."""

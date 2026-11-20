@@ -267,6 +267,12 @@ code {
     opacity: 0.85;
 }
 
+/* Where a target sat that the head got bored of; ignored for now. */
+.target.ignored {
+    border-style: dashed;
+    opacity: 0.35;
+}
+
 .error {
     margin: 12px 0 0;
     color: var(--bad);
