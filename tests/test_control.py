@@ -1,4 +1,5 @@
 import threading
+import time
 
 import numpy as np
 import pytest
@@ -212,14 +213,13 @@ class TestCyclePublishing:
 
     def test_starts_idle(self):
         snap = State().snapshot()
-        assert snap["phase"] == "idle" and snap["cycle"] == 0
+        assert snap["phase"] == "idle"
         assert snap["bored_in"] is None and snap["still_for"] is None
 
-    def test_the_first_tick_starts_a_cycle(self, app):
+    def test_the_first_tick_starts_scanning(self, app):
         state = State()
         drive(app, FakeMini(), state)
-        snap = state.snapshot()
-        assert snap["phase"] == "moving" and snap["cycle"] == 1
+        assert state.snapshot()["phase"] == "scanning"
 
     def test_a_disabled_app_stays_idle(self, app):
         state = State()
@@ -252,8 +252,8 @@ class TestEnteringAPhase:
     def cycle_in(self, phase):
         from reachy_gaze.cycle import Cycle
 
-        cycle = Cycle(lambda: None, 1.0, 1.0, 1.0)
-        cycle.phase, cycle.count = phase, 3
+        cycle = Cycle()
+        cycle.phase = phase
         return cycle
 
     def tracking_state(self):
@@ -264,28 +264,39 @@ class TestEnteringAPhase:
         state.stillness.update(np.array([1.0, 0.0, 0.0]), 0.0)
         return state
 
-    def test_a_new_cycle_drops_the_old_target(self):
+    def test_boredom_drops_the_target_and_ignores_where_it_was(self):
         from reachy_gaze.cycle import Phase
 
         state = self.tracking_state()
-        ReachyGaze._enter_phase(state, self.cycle_in(Phase.MOVING), 7.0)
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.SCANNING), 7.0, True)
         assert state.goal is None and state.center is None and state.label == ""
         assert state.stillness.still_for(8.0) is None
-        assert (state.phase, state.phase_since, state.cycle) == (Phase.MOVING, 7.0, 3)
+        assert (state.phase, state.phase_since) == (Phase.SCANNING, 7.0)
+        assert state.ignored.covers(np.array([1.0, 0.0, 0.0]), 8.0)
 
     def test_losing_a_target_keeps_the_held_aim_but_not_the_boredom(self):
         from reachy_gaze.cycle import Phase
 
         state = self.tracking_state()
-        ReachyGaze._enter_phase(state, self.cycle_in(Phase.SCANNING), 7.0)
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.SCANNING), 7.0, False)
         assert state.goal is not None
         assert state.stillness.still_for(8.0) is None
+        assert not state.ignored.covers(np.array([1.0, 0.0, 0.0]), 8.0)
+
+    def test_going_idle_forgets_what_was_ignored(self):
+        from reachy_gaze.cycle import Phase
+
+        state = self.tracking_state()
+        state.ignored.add(np.array([1.0, 0.0, 0.0]), 0.0)
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.IDLE), 7.0, False)
+        assert state.goal is None
+        assert not state.ignored.covers(np.array([1.0, 0.0, 0.0]), 8.0)
 
     def test_starting_to_track_keeps_the_boredom_clock(self):
         from reachy_gaze.cycle import Phase
 
         state = self.tracking_state()
-        ReachyGaze._enter_phase(state, self.cycle_in(Phase.TRACKING), 7.0)
+        ReachyGaze._enter_phase(state, self.cycle_in(Phase.TRACKING), 7.0, False)
         assert state.stillness.still_for(8.0) == 8.0
 
 
@@ -358,7 +369,7 @@ class TestLockingByPhase:
 
             return [Detection("cat", 0.9, (300.0, 220.0, 380.0, 300.0))]
 
-    def run_vision(self, monkeypatch, phase, seconds=0.3):
+    def run_vision(self, monkeypatch, phase, seconds=0.3, ignore=None):
         import reachy_gaze.main as main
 
         monkeypatch.setattr(main, "DETECT_HZ", 100.0)
@@ -367,6 +378,8 @@ class TestLockingByPhase:
         media.camera = self.Camera()
         state, stop = State(), threading.Event()
         state.phase = phase
+        if ignore is not None:
+            state.ignored.add(ignore, time.monotonic())
         vision = threading.Thread(
             target=ReachyGaze()._track_forever,
             args=(self.Mini(media), state, stop),
@@ -378,11 +391,10 @@ class TestLockingByPhase:
         vision.join(timeout=2.0)
         return state
 
-    @pytest.mark.parametrize("phase", ["moving", "holding", "idle"])
-    def test_no_lock_while_not_looking(self, monkeypatch, phase):
+    def test_no_lock_while_idle(self, monkeypatch):
         from reachy_gaze.cycle import Phase
 
-        state = self.run_vision(monkeypatch, Phase(phase))
+        state = self.run_vision(monkeypatch, Phase.IDLE)
         assert state.goal is None
         assert state.stillness.still_for(0.0) is None
         assert state.targets, "what is in view is still shown on the panel"
@@ -394,71 +406,14 @@ class TestLockingByPhase:
         assert state.goal is not None and state.label == "cat"
         assert state.stillness.still_for(state.last_seen) is not None
 
+    def test_a_target_the_head_tired_of_is_not_taken_again(self, monkeypatch):
+        from reachy_gaze.cycle import Phase
 
-@pytest.fixture(scope="module")
-def kin():
-    from reachy_mini.kinematics.analytical_kinematics import AnalyticalKinematics
-
-    return AnalyticalKinematics(automatic_body_yaw=True)
-
-
-class TestReach:
-    """Random poses are checked against the kinematics the daemon uses."""
-
-    def test_neutral_is_reachable(self, kin):
-        from scipy.spatial.transform import Rotation
-
-        from reachy_gaze.main import head_can_reach
-
-        assert head_can_reach(kin, (Rotation.identity(), np.zeros(3)))
-
-    def test_an_extreme_pose_is_not(self, kin):
-        from scipy.spatial.transform import Rotation
-
-        from reachy_gaze.main import head_can_reach
-
-        tilted = Rotation.from_euler("YX", [40, 40], degrees=True)
-        assert not head_can_reach(kin, (tilted, np.array([0.0, 0.0, 0.05])))
-
-    def test_the_configured_ranges_do_hit_unreachable_poses(self, kin):
-        # Otherwise the check would be dead weight and the ranges could widen.
-        import random
-
-        from reachy_gaze.cycle import random_pose
-        from reachy_gaze.main import (
-            RANDOM_SHIFT,
-            RANDOM_TILT,
-            RANDOM_YAW,
-            head_can_reach,
-        )
-
-        rng = random.Random(0)
-        draws = [
-            random_pose(rng, RANDOM_YAW, RANDOM_TILT, RANDOM_SHIFT) for _ in range(200)
-        ]
-        assert not all(head_can_reach(kin, p) for p in draws)
-
-    def test_every_chosen_pose_is_reachable(self, kin):
-        import random
-
-        from reachy_gaze.cycle import random_pose
-        from reachy_gaze.main import (
-            RANDOM_SHIFT,
-            RANDOM_TILT,
-            RANDOM_YAW,
-            head_can_reach,
-        )
-
-        rng = random.Random(0)
-        for _ in range(200):
-            pose = random_pose(
-                rng,
-                RANDOM_YAW,
-                RANDOM_TILT,
-                RANDOM_SHIFT,
-                lambda p: head_can_reach(kin, p),
-            )
-            assert head_can_reach(kin, pose)
+        # the cat sits just off the camera axis, i.e. straight ahead
+        ahead = np.array([1.0, 0.0, 0.0])
+        state = self.run_vision(monkeypatch, Phase.SCANNING, ignore=ahead)
+        assert state.goal is None and state.label == ""
+        assert not state.targets, "an ignored target is not shown as in view"
 
 
 class TestTargetCrop:

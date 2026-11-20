@@ -14,7 +14,7 @@ This document covers how the pieces fit together. See the
 ```
 reachy_gaze/
 ├── main.py          # the app: ReachyGaze, shared State, control loop, vision thread, panel API
-├── cycle.py         # look-around state machine (Phase, Cycle), random poses, Stillness
+├── cycle.py         # look-around state machine (Phase, Cycle), Stillness, Ignored
 ├── tracking.py      # TargetSelector, CenterFilter, PoseSmoother, coordinate helpers
 ├── detector.py      # Detector protocol, Triton / built-in / VLM clients, BACKENDS registry
 ├── server/
@@ -101,8 +101,9 @@ classDiagram
         head_pose: 4x4
         last_seen, center, box, crop, crop_id
         targets, lens, label
-        phase, phase_since, cycle
+        phase, phase_since
         stillness: Stillness
+        ignored: Ignored
         detector_ok, error, fps
         snapshot() dict
     }
@@ -115,6 +116,7 @@ classDiagram
     ReachyGaze ..> State : creates, shares between threads
     ReachyGaze ..> Config : POST /config body
     State *-- Stillness
+    State *-- Ignored
 ```
 
 `State` is the only thing shared between the two threads and the HTTP
@@ -128,19 +130,13 @@ classDiagram
     class Phase {
         <<enum>>
         IDLE
-        MOVING
-        HOLDING
         SCANNING
         TRACKING
     }
     class Cycle {
-        pose_fn: () -> Pose
-        hold, move_timeout, idle_reset
         phase: Phase
         since: float
-        count: int
-        pose: Pose
-        update(now, enabled, arrived, aimed, bored) bool
+        update(now, enabled, aimed, bored) bool
     }
     class Stillness {
         limit: radians
@@ -150,8 +146,14 @@ classDiagram
         still_for(now) float
         reset()
     }
+    class Ignored {
+        limit: radians
+        seconds: float
+        add(direction, now)
+        covers(direction, now) bool
+        clear()
+    }
     Cycle --> Phase
-    Cycle ..> random_pose : pose_fn
 ```
 
 `Cycle` takes the current time as an argument rather than reading the clock,
@@ -262,7 +264,7 @@ flowchart LR
     end
 
     subgraph Control["Control loop (_drive), 50 Hz"]
-        CY["Cycle.update()"] --> T["choose target:<br/>goal / scan / random pose"]
+        CY["Cycle.update()"] --> T["choose target:<br/>goal / scan / neutral"]
         T --> CL["clamp_yaw()"]
         CL --> PS["PoseSmoother.step()"]
         PS --> ST["mini.set_target(head, antennas)"]
@@ -321,32 +323,23 @@ if the model can't detect one of `TRACK_LABELS`.
 ```mermaid
 stateDiagram-v2
     [*] --> IDLE
-    IDLE --> MOVING : enabled
-    MOVING --> HOLDING : arrived, or MOVE_TIMEOUT (5 s)
-    HOLDING --> SCANNING : HOLD_SECONDS (10 s)
+    IDLE --> SCANNING : enabled
     SCANNING --> TRACKING : aimed (seen within LOST_AFTER)
-    SCANNING --> MOVING : IDLE_RESET (30 s), new random pose
-    TRACKING --> MOVING : bored (still for bored_after)
+    TRACKING --> SCANNING : bored (still for bored_after), target ignored
     TRACKING --> SCANNING : not aimed (lost for LOST_AFTER, 10 s)
-    MOVING --> IDLE : disabled
-    HOLDING --> IDLE : disabled
     SCANNING --> IDLE : disabled
     TRACKING --> IDLE : disabled
 ```
 
-Each entry into `MOVING` draws a new random pose from `random_pose`, redrawn
-until the head's kinematics can reach it, and increments `cycle`. On entering
-a phase, `_enter_phase` publishes it to `State`. Outside `SCANNING` and
-`TRACKING` it also clears the goal and the box, so a new cycle doesn't lock
-straight back onto the target it just got bored of.
+On entering a phase, `_enter_phase` publishes it to `State`. Going idle, or
+leaving `TRACKING` out of boredom, clears the goal and the box. A lost target
+keeps its held aim instead, which no longer matters once the scan takes over.
 
 What the control loop aims at in each phase:
 
 | Phase      | Head target                                                           |
 | ---------- | --------------------------------------------------------------------- |
 | `idle`     | Neutral orientation at `REST_POSITION`                                |
-| `moving`   | The cycle's random pose                                               |
-| `holding`  | The cycle's random pose                                               |
 | `scanning` | A yaw sine sweep starting from the current yaw and direction          |
 | `tracking` | `State.goal`, the world-frame direction of the target                 |
 
@@ -359,7 +352,14 @@ The antennas wag while searching and perk up while tracking, eased with
 `Stillness` keeps the target's world-frame direction as an anchor. If the
 target moves more than `STILL_DEGREES` (8°) from it, the anchor and clock
 reset. A target that keeps moving is followed indefinitely. One that stays
-put for `bored_after` seconds ends the cycle.
+put for `bored_after` seconds sends the head back to scanning.
+
+A bored target usually hasn't gone anywhere, so on boredom its settled
+direction goes into `Ignored`. For `IGNORE_SECONDS` (60 s), the vision thread
+drops any detection within `IGNORE_DEGREES` (15°) of it, before selection,
+which means the scan sweeps past it. The check is repeated when the goal is
+published, in case boredom struck while a detection was in flight. Going idle
+clears the list.
 
 ## Target Selection
 
@@ -473,12 +473,9 @@ All of these are at the top of `reachy_gaze/main.py`. The ones marked
 | `LOST_AFTER`     | 10 s    | How long the aim is held after the last sighting         |
 | `BORED_AFTER`    | 20 s    | Stillness before moving on (*panel*: Boredom)            |
 | `STILL_DEGREES`  | 8°      | Movement that resets the boredom clock                   |
-| `HOLD_SECONDS`   | 10 s    | Pause at each random pose                                |
-| `IDLE_RESET`     | 30 s    | Fruitless scanning before a new random pose              |
-| `RANDOM_YAW`     | 90°     | Yaw range of random poses                                |
-| `RANDOM_TILT`    | 30°     | Pitch and roll range of random poses                     |
-| `RANDOM_SHIFT`   | 0.02 m  | Position range of random poses, per axis                 |
-| `HEAD_LIFT`      | 0.02 m  | Raises the rest and random positions                     |
+| `IGNORE_DEGREES` | 15°     | How close to a bored target a detection is ignored       |
+| `IGNORE_SECONDS` | 60 s    | How long a bored target is ignored                       |
+| `HEAD_LIFT`      | 0.02 m  | Holds the head up off the body                           |
 
 The detection confidence threshold (`conf`, 0.75) is also set in the panel.
 
@@ -486,10 +483,10 @@ The detection confidence threshold (`conf`, 0.75) is also set in the panel.
 
 | Suite                    | Covers                                                       |
 | ------------------------ | ------------------------------------------------------------ |
-| `tests/test_cycle.py`    | Phase transitions, random poses, stillness                   |
+| `tests/test_cycle.py`    | Phase transitions, stillness, ignored directions             |
 | `tests/test_tracking.py` | Selector, filters, smoother, scan posture, vocabulary check  |
 | `tests/test_detector.py` | Each backend's request and response handling                 |
-| `tests/test_control.py`  | `ReachyGaze` against a fake robot, `Config`, reachability    |
+| `tests/test_control.py`  | `ReachyGaze` against a fake robot, `Config`, phases          |
 | `tests/test_traffic.py`  | Server traffic accounting                                    |
 | `tests/test_panel.mjs`   | Out-of-order responses and dirty-field handling in `main.js` |
 

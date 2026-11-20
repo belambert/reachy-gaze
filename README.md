@@ -14,9 +14,9 @@ tags:
 
 # Reachy Gaze
 
-A Reachy Mini app that makes the robot look at people and pets. It moves its
-head to a random pose, scans the room from there, follows whatever it finds,
-and starts over once its target has sat still long enough to get boring.
+A Reachy Mini app that makes the robot look at people and pets. It scans the
+room, follows whatever it finds, and once its target has sat still long enough
+to get boring, ignores it for a while and scans for something else.
 
 Detection runs **off-board** on a machine with a GPU, because the robot's Pi is
 busy with motor control. The robot streams downscaled JPEGs to a detector and
@@ -62,25 +62,24 @@ Tuning constants, including which classes it looks for, live at the top of
 The head runs a cycle of phases, published as `phase` in the panel's `/state`
 endpoint (<http://localhost:8042/state>):
 
-| Phase      | What the head does                                                    | Ends when                                                                                 |
-| ---------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `idle`     | Rests at neutral; tracking is switched off                            | Tracking is switched on                                                                   |
-| `moving`   | Goes to a random orientation and position the head can reach          | It arrives (or 5 s pass)                                                                  |
-| `holding`  | Holds still at that pose, ignoring what it sees                       | 10 s pass                                                                                 |
-| `scanning` | Sweeps side to side from where it is                                  | It locks onto a target, or 30 s pass (new cycle)                                          |
-| `tracking` | Follows the target, moving or not, holding its aim through short gaps | The target is still for the boredom time (new cycle), or lost for 10 s (back to scanning) |
+| Phase      | What the head does                                                    | Ends when                                                     |
+| ---------- | --------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `idle`     | Rests at neutral; tracking is switched off                            | Tracking is switched on                                       |
+| `scanning` | Sweeps side to side from where it is                                  | It locks onto a target                                        |
+| `tracking` | Follows the target, moving or not, holding its aim through short gaps | The target is still for the boredom time, or lost for 10 s    |
 
-A target counts as still while it stays within a few degrees of where it
-settled, so a moving target is followed indefinitely. The boredom time is the
-panel's Boredom slider (20 s by default).
+Both ways out of `tracking` lead back to `scanning`. A target counts as still
+while it stays within a few degrees of where it settled, so a moving target is
+followed indefinitely. The boredom time is the panel's Boredom slider (20 s by
+default). Once bored, the head ignores anything within 15° of where that
+target sat for a minute, so the scan finds something else rather than the
+same target again.
 
 The Travel slider limits how far the head turns left and right of straight
-ahead (90° by default, up to 160°). It bounds the scan, the random poses and
-tracking alike.
+ahead (90° by default, up to 160°). It bounds the scan and tracking alike.
 
-Alongside `phase`, `/state` reports `cycle` (a count that goes up with each
-random pose), `phase_for` (seconds in the current phase), and while tracking,
-`still_for` and `bored_in` (seconds).
+Alongside `phase`, `/state` reports `phase_for` (seconds in the current
+phase), and while tracking, `still_for` and `bored_in` (seconds).
 
 ## Development
 
