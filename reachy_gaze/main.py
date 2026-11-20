@@ -49,6 +49,9 @@ from reachy_gaze.tracking import (
 TRACK_LABELS = ["cat", "dog", "bird", "person"]
 
 MIN_AREA_FRAC = 0.01  # detections smaller than this share of the frame are ignored
+# Sightings near one spot needed before a first lock, so a one-frame false
+# positive can't send the head off to hold its aim on nothing for LOST_AFTER.
+CONFIRM_FRAMES = 3
 
 CONTROL_HZ = 50.0
 DETECT_HZ = 12.0  # request ceiling; the server is usually quicker than this
@@ -423,7 +426,9 @@ class ReachyGaze(ReachyMiniApp):
         K, D = camera.K, camera.D
         T_head_cam = getattr(mini, "T_head_cam", None)
 
-        selector = TargetSelector(TRACK_LABELS, min_area_frac=MIN_AREA_FRAC)
+        selector = TargetSelector(
+            TRACK_LABELS, min_area_frac=MIN_AREA_FRAC, confirm_after=CONFIRM_FRAMES
+        )
         smoother = CenterFilter()
         detector: Detector | None = None
         detector_key: tuple[str, str] | None = None

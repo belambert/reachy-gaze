@@ -105,6 +105,10 @@ class TargetSelector:
     The max-jump gate is what stops the head snapping between two cats; the miss
     counter is what lets it let go once the real one has left the room.
 
+    A first lock needs the same thing seen `confirm_after` times near one spot,
+    with at most `max_gap` frames running without it, so a one-frame ghost
+    doesn't send the head off to stare at nothing.
+
     `priority` ranks the classes: earlier is preferred, and a class we would
     rather watch takes the lock off one we are already watching. It has to be
     seen for `upgrade_after` frames running to do that, so a detection
@@ -119,6 +123,9 @@ class TargetSelector:
         max_jump: float = 0.5,
         max_misses: int = 12,
         upgrade_after: int = 3,
+        confirm_after: int = 1,
+        confirm_radius: float = 0.2,
+        max_gap: int = 1,
     ) -> None:
         """Create a selector with the given preference and association gates."""
         self._priority = list(priority or [])
@@ -126,10 +133,16 @@ class TargetSelector:
         self._max_jump = max_jump
         self._max_misses = max_misses
         self._upgrade_after = upgrade_after
+        self._confirm_after = confirm_after
+        self._confirm_radius = confirm_radius
+        self._max_gap = max_gap
         self._center: tuple[float, float] | None = None
         self._label: str | None = None
         self._misses = 0
         self._better = 0
+        self._candidate: Detection | None = None
+        self._hits = 0
+        self._gap = 0
 
     def select(
         self, dets: list[Detection], width: int, height: int
@@ -146,8 +159,11 @@ class TargetSelector:
         self._better = self._better + 1 if best < self._rank(self._label) else 0
         wanted = [det for det in dets if self._rank(det.label) == best]
 
-        acquiring = self._center is None or self._better >= self._upgrade_after
-        if acquiring:
+        if self._center is None:
+            det = max(wanted, key=lambda d: d.area)
+            if not self._confirmed(det, width, height):
+                return None
+        elif self._better >= self._upgrade_after:
             det = max(wanted, key=lambda d: d.area)
         else:
             anchor = self._center
@@ -164,6 +180,23 @@ class TargetSelector:
         self._better = 0
         return det
 
+    def _confirmed(self, det: Detection, width: int, height: int) -> bool:
+        """Count a sighting toward a first lock; True once there are enough."""
+        center = norm_center(det, width, height)
+        last = self._candidate
+        same = (
+            last is not None
+            and last.label == det.label
+            and _dist2(center, norm_center(last, width, height))
+            <= self._confirm_radius**2
+        )
+        self._hits = self._hits + 1 if same else 1
+        self._candidate, self._gap = det, 0
+        if self._hits < self._confirm_after:
+            return False
+        self._candidate, self._hits = None, 0
+        return True
+
     def _rank(self, label: str | None) -> int:
         """Lower is preferred; anything unlisted comes last."""
         if label in self._priority:
@@ -171,6 +204,9 @@ class TargetSelector:
         return len(self._priority)
 
     def _miss(self) -> None:
+        self._gap += 1
+        if self._gap > self._max_gap:
+            self._candidate, self._hits = None, 0
         self._misses += 1
         if self._misses > self._max_misses:
             self._center = None
@@ -192,6 +228,7 @@ class TargetSelector:
         self._label = None
         self._misses = 0
         self._better = 0
+        self._candidate, self._hits, self._gap = None, 0, 0
 
 
 class CenterFilter:

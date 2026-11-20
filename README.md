@@ -68,7 +68,9 @@ endpoint (<http://localhost:8042/state>):
 | `scanning` | Sweeps side to side from where it is                                  | It locks onto a target                                        |
 | `tracking` | Follows the target, moving or not, holding its aim through short gaps | The target is still for the boredom time, or lost for 10 s    |
 
-Both ways out of `tracking` lead back to `scanning`. A target counts as still
+To start tracking, it has to see the same thing three times near one spot,
+so a one-frame false detection doesn't set it off. Both ways out of
+`tracking` lead back to `scanning`. A target counts as still
 while it stays within a few degrees of where it settled, so a moving target is
 followed indefinitely. The boredom time is the panel's Boredom slider (20 s by
 default). Once bored, the head ignores anything within 15° of where that
