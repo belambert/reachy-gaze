@@ -46,6 +46,8 @@ from reachy_gaze.tracking import (
 # in view, and the head will leave the one for the other.
 TRACK_LABELS = ["cat", "dog", "bird", "person"]
 
+MIN_AREA_FRAC = 0.01  # detections smaller than this share of the frame are ignored
+
 CONTROL_HZ = 50.0
 DETECT_HZ = 12.0  # request ceiling; the server is usually quicker than this
 SMOOTH_TAU = 0.09  # follower time constant; larger is smoother and laggier
@@ -443,7 +445,7 @@ class ReachyGaze(ReachyMiniApp):
         K, D = camera.K, camera.D
         T_head_cam = getattr(mini, "T_head_cam", None)
 
-        selector = TargetSelector(TRACK_LABELS)
+        selector = TargetSelector(TRACK_LABELS, min_area_frac=MIN_AREA_FRAC)
         smoother = CenterFilter()
         detector: Detector | None = None
         detector_key: tuple[str, str] | None = None
@@ -522,7 +524,7 @@ class ReachyGaze(ReachyMiniApp):
                 state.targets = [
                     {"label": d.label, "center": list(norm_center(d, width, height))}
                     for d in dets
-                    if d is not det
+                    if d is not det and d.area >= MIN_AREA_FRAC * width * height
                 ]
                 # Re-checked here: the phase may have moved on during detection,
                 # and a fresh cycle must not inherit this lock.
