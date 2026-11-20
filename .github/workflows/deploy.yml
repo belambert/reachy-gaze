@@ -1,0 +1,38 @@
+name: Deploy
+
+# The robot installs the app from the Hugging Face Space, so main is mirrored
+# there once its tests pass. Needs an HF_TOKEN secret (a write token) and an
+# HF_SPACE variable naming the Space as owner/name.
+on:
+  workflow_run:
+    workflows: [Test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  space:
+    # a manual run deploys whatever main is; an automatic one only a passing push
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0 # the Hub refuses pushes from a shallow clone
+          lfs: true
+      - name: Push to the Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          : "${HF_TOKEN:?set the HF_TOKEN repository secret}"
+          : "${HF_SPACE:?set the HF_SPACE repository variable, e.g. owner/name}"
+          git push "https://user:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:refs/heads/main
